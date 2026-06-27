@@ -1,539 +1,329 @@
-# Smart Charge: Flexible Load Optimisation Platform
-### A Full Portfolio Data Engineering Project — Step by Step
+# Multi-Day Energy Demand & Price Forecasting
+### A Data-Engineering-Heavy ML Portfolio Project, Right-Sized on AWS, Tailored for Octopus Energy
 
 ---
 
-## Overview
+## The One-Paragraph Pitch
 
-You're building a platform that answers: **"When is the best time to use electricity?"** — based on live carbon intensity and price data. EV charging is the first use case, but the architecture generalises to any flexible load.
+Forecast GB electricity demand — and, as a tailored extension, Octopus Agile prices — several days ahead, at the horizon where no official forecast exists yet. The project ingests live demand, weather forecasts, carbon intensity, and tariff data on a continuous schedule; builds a **point-in-time-correct feature store** (the engineering centrepiece); trains and walk-forward-validates a forecasting model; regenerates forecasts on a schedule via batch inference; and tracks forecast accuracy as reality arrives. The output is a live dashboard showing actuals against what the model predicted, with an accuracy-over-time view that proves the ML is real.
 
-By the end you will have touched: Python pipelines, PostgreSQL, dbt, Kafka (streaming), ML forecasting, MLflow, FastAPI, Streamlit, Airflow, Terraform, and AWS. Each phase builds on the last, so you're always learning in context rather than in isolation.
-
-**Estimated time:** 4–6 weeks part-time, going deep.
+It runs on AWS, provisioned with Terraform, but every service is chosen because it's the *right* tool for the workload — not to tick a box. Notably, it uses **scheduled batch inference rather than a live ML endpoint**, because forecasts are generated on a schedule, not on demand. That single decision keeps the ML layer simple, cheap, and honest.
 
 ---
 
-## Phase 0 — Environment Setup (Days 1–2)
+## Why This Project Survives Scrutiny
 
-**What you'll learn:** Project hygiene, Docker, environment management.
+Every static-attribute prediction idea collapses into one of two traps: the target is a deterministic function of the features (too easy), or it's hopelessly confounded (not honestly measurable). **Forecasting is structurally immune to both:**
+
+- **It can't be trivially easy.** The future genuinely isn't in your features. A model that forecasts demand three days out is doing real work, because the answer doesn't exist yet anywhere in the data.
+- **It's honestly measurable.** Wait, and reality tells you exactly how good your forecast was. No confounding, no hand-waving — just error metrics against what actually happened.
+- **It's the most DE-heavy form of ML there is.** The hard part isn't the model; it's building features that respect time correctly (no leakage from the future) across continuously-arriving data. That's genuine, non-trivial data engineering — and it's the part that levels you up.
+- **It restores the real-time quality.** Data arrives continuously, forecasts regenerate every few hours, the dashboard is live. The thing is genuinely useful to watch.
+- **It's directly Octopus's business.** Demand and price forecasting underpin grid balancing, tariff-setting, and flexibility products. This is what their data team actually does.
+
+---
+
+## The Core Target (and why it's honest)
+
+**Primary target: GB electricity demand, forecast 1–7 days ahead.**
+
+Short-term load forecasting is a classic, genuinely-hard problem — driven by weather, calendar, and human behaviour, with no closed-form answer. Crucially, **beyond the day-ahead horizon there's no published forecast to copy**, so the prediction is a real unknown.
+
+**The leakage trap you must avoid (this is the whole game):** at prediction time you do *not* know tomorrow's actual weather — you only have a weather *forecast*. So your features must use **weather forecasts as they were issued at prediction time**, never actual weather. Training on actual weather is the single most common way people accidentally cheat at energy forecasting, and it makes the model look brilliant in backtest and useless in production. Getting this right is the core engineering challenge and the thing a sharp interviewer will probe.
+
+**Tailored extension: Octopus Agile price, forecast beyond the published window.** Octopus publishes Agile prices for the next day around 4pm. So forecasting *within* 24h is copying a published answer (the carbon-forecast trap again). The honest, valuable target is **2–7 days ahead**, where no published price exists. Build demand forecasting as the solid core first; add price as the Octopus-specific extension once the core works.
+
+---
+
+## Architecture at a Glance
+
+```
+                          ┌─────────────────────────────────────────┐
+                          │            Terraform (IaC)               │
+                          │   S3 state backend + DynamoDB locking    │
+                          └─────────────────────────────────────────┘
+
+  EventBridge (schedules)
+        │
+        ├─▶ Lambda: ingest demand (NESO/Elexon)      ──┐
+        ├─▶ Lambda: ingest weather FORECASTS          ──┤
+        ├─▶ Lambda: ingest carbon intensity           ──┼─▶ S3 Bronze (raw, Parquet)
+        └─▶ Lambda: ingest Agile prices               ──┘        │
+                                                                  ▼
+                                                    Glue Catalog ◀── Glue Crawler
+                                                                  │
+                                                                  ▼
+                                              Athena + dbt ──▶ S3 Silver (clean)
+                                                                  │
+                                                                  ▼
+                                          S3 Gold: point-in-time feature store
+                                                                  │
+                          ┌───────────────────────────────────────┤
+                          ▼                                        ▼
+              Scheduled training job                  Scheduled BATCH inference
+              (Lambda / Fargate task)                 (Lambda / Fargate task)
+                          │                                        │
+                          ▼                                        ▼
+              Model artefact + metadata               Forecasts table (S3/Athena)
+              in S3 (versioned)                                    │
+                                                                   ▼
+                                          Accuracy tracker ──▶ Streamlit dashboard
+                                          (forecast vs actual)
+
+         Orchestrated by AWS Step Functions; scheduled by EventBridge
+```
+
+---
+
+## The AWS Stack — and the Choices We Deliberately Made
+
+This is the part you asked for: AWS where earned, the honest cheaper option everywhere else.
+
+| Decision | Choice | Why (and why not the alternative) |
+|---|---|---|
+| Ingestion | **Lambda + EventBridge** | Small, frequent API pulls (half-hourly/daily). Lambda is serverless, scales to zero, free-tier-friendly. *Not Glue* — Glue Python-shell suited the EPC bulk pull, but it's overkill for tiny frequent payloads. |
+| Storage | **S3, Parquet, partitioned** | Correct at any scale; cheap; queryable by Athena. |
+| Query | **Glue Catalog + Athena** | Serverless SQL, pay-per-scan, zero idle cost. *Not Redshift* — data is small; a warehouse is unjustified. |
+| Transform | **dbt-athena** | You know dbt; gives tests + lineage. Builds the feature store. |
+| ML training | **Scheduled Lambda or Fargate task** | Tree-based forecaster trains in minutes on modest data. *Not SageMaker training* — managed training ceremony isn't warranted at this size. |
+| ML serving | **Scheduled BATCH inference** (not an endpoint) | **The key decision.** Forecasts are generated on a schedule, not per user request — so you run a batch job that writes forecasts to a table. *No SageMaker endpoint, no always-on inference cost.* This is genuinely more correct for forecasting, not just cheaper. |
+| Model registry | **S3 versioning + a metadata table** | Sufficient for one model family. *MLflow optional* if you want the experiment-tracking UI; run it locally to avoid hosting cost. |
+| Orchestration | **Step Functions + EventBridge** | AWS-native, serverless, on the cert, new to you (vs. your day-job Prefect). |
+| Streaming | **None** | Data is half-hourly batch. *Kinesis would be theatre.* Note in the README where it *would* be justified (e.g. live smart-meter feeds) — that's the honest forward-looking answer. |
+| IaC | **Terraform** | All of the above, with least-privilege IAM, lifecycle rules, and `destroy` discipline. |
+
+**The headline talking point:** *"I used scheduled batch inference instead of a live ML endpoint, because the use case generates forecasts on a schedule rather than on demand — so an always-on endpoint would have been pure cost for no benefit."* That sentence demonstrates exactly the judgement that separates associate from junior.
+
+---
+
+## Phase 0 — Setup & Cost Guardrails (Day 1)
+
+Identical discipline to any serious AWS project — do this before any chargeable resource exists.
+
+1. **Billing alarms** at £5 and £15; an **AWS Budget** at £20/month with alerts.
+2. **Terraform remote state**: S3 bucket + DynamoDB lock table, encrypted.
+3. **Repo structure**:
+   ```
+   foresight/
+   ├── infra/              # Terraform (module per service)
+   ├── ingestion/          # Lambda handlers per source
+   ├── dbt/                # Silver + feature-store models
+   ├── ml/                 # training, backtest, batch inference
+   ├── orchestration/      # Step Functions + EventBridge
+   ├── dashboard/          # Streamlit app
+   ├── docs/               # architecture diagram, teardown runbook
+   └── README.md
+   ```
+4. **Teardown runbook** (`docs/TEARDOWN.md`) — keep current from day one.
+5. **Region**: `eu-west-2` (London) throughout.
+
+---
+
+## Phase 1 — Data Model & the Point-in-Time Problem (Days 2–5)
+
+**This is the most important phase. Everything hinges on getting temporal correctness right.**
+
+### Data sources (all open)
+- **GB electricity demand** — NESO (National Energy System Operator) data portal / Elexon Insights. Half-hourly national demand, historical + near-real-time.
+- **Weather forecasts (predictor features)** — Open-Meteo's **Previous Runs API** is the correct source. It serves each variable at fixed lead-time offsets (1, 2, 3 … up to 7 days ahead) — i.e. "the weather as forecast N days before its target." This maps directly onto your 1–7 day forecast horizons and is leakage-safe by construction. No API key. *History note: most models start January 2024; GFS goes back to March 2021. A couple of years is enough — it covers both winters (the dominant demand signal) and supports a real walk-forward backtest. Standardise on one model (GFS for more history, UK Met Office / ECMWF for resolution).*
+- **Weather actuals (targets / lagged drivers)** — Open-Meteo's **Historical Forecast API** (a stitched best-estimate series, close to actuals from ~2021) or the **Historical Weather API** (ERA5 reanalysis). Use one of these for ground-truth/target values and for *known-past* weather features. Do NOT use these as forward predictor features — that's the leakage trap.
+- **Why not `forecast_hours`/`past_hours`?** Those parameters only window the response relative to a reference point; they cannot select a forecast *issue date*. The Previous Runs API (fixed lead-time offsets) or the Single Runs API (`run=` initialisation time) are the mechanisms for issued-forecast retrieval.
+- **Carbon intensity** — `api.carbonintensity.org.uk`, regional, with forecast + actual.
+- **Agile prices** — Octopus Energy public API, half-hourly.
+- **Calendar** — UK bank holidays (gov.uk open JSON), plus derived day-of-week/season features.
+
+### The core design decision: forecast issue time vs. target time
+Every feature row must be tagged with **two timestamps**: the time the forecast is *for* (`target_ts`) and the time the information was *known* (`issue_ts`). A weather feature for `target_ts = Thursday 6pm` must come from a forecast whose `issue_ts` is *before* your prediction moment — never from Thursday's actual weather.
+
+### S3 layout
+```
+s3://foresight-data/
+├── bronze/                         raw pulls, by source
+│   ├── demand/ingest_date=.../
+│   ├── weather_prevruns/issue_offset=.../    # Previous Runs: forecast-as-issued (predictors)
+│   ├── weather_actuals/date=.../             # Historical Forecast/ERA5: actuals (targets)
+│   ├── carbon/ingest_date=.../
+│   └── agile/ingest_date=.../
+├── silver/                         cleaned, typed (Parquet)
+└── gold/feature_store/             point-in-time features
+    └── target_date=.../
+```
+
+Keep the two weather streams physically separate: the Previous Runs predictors are tagged by lead-time offset (so you always know how far ahead each forecast was issued), while actuals are keyed only by date. That separation is what makes the point-in-time join downstream both correct and easy to reason about. Get this layout right and the rest of the temporal logic becomes tractable.
+
+---
+
+## Phase 2 — Continuous Ingestion (Days 6–10)
+
+**Service: Lambda + EventBridge.** One Lambda per source, each on its own schedule.
 
 ### Tasks
-1. Create a GitHub repo with a clear README from day one. Commit everything, even rough early work.
-2. Set up a Python virtual environment (use `pyenv` + `venv` or `conda`).
-3. Install Docker Desktop — you'll use it throughout.
-4. Set up `pre-commit` hooks with `black`, `ruff`, and `isort` for code quality from the start.
-5. Create a `.env` file for secrets and add it to `.gitignore` immediately.
+1. Write a Lambda handler per source: fetch → validate (Pydantic) → write Parquet to the right Bronze prefix.
+2. **Critically, for weather: capture forecasts as issued.** Going forward, pull the live forecast each day and store it stamped with its `issue_date`. To bootstrap a training history immediately, backfill from the **Previous Runs API** — it returns weather at fixed lead-time offsets (1–7 days ahead), which is exactly "forecast as issued N days before target." That backfill is what lets you train and backtest from day one rather than waiting weeks to accumulate live captures.
+3. Schedule with EventBridge: demand/carbon every 30–60 min, weather forecasts daily, Agile daily after the ~4pm release.
+4. Make every write idempotent (overwrite by date key, no duplicate appends).
+5. Define Lambdas, schedules, and tightly-scoped IAM roles in Terraform.
 
-### Project structure to start with
-```
-smart-charge/
-├── ingestion/          # Raw API clients
-├── dbt/                # Transformation layer
-├── ml/                 # Forecasting models
-├── api/                # FastAPI serving layer
-├── dashboard/          # Streamlit app
-├── orchestration/      # Airflow DAGs
-├── infrastructure/     # Terraform
-├── tests/
-├── docker-compose.yml
-└── README.md
-```
-
-### Why this matters for the interview
-Starting with structure and tooling signals seniority. Many engineers build first and organise never.
+> **Cost note:** Lambda + EventBridge at this frequency sits comfortably in the free tier. Nothing idles.
 
 ---
 
-## Phase 1 — Data Ingestion (Days 3–7)
+## Phase 3 — Catalog & Athena (Days 11–12)
 
-**What you'll learn:** REST API clients, pagination, error handling, rate limiting, data contracts.
+**Glue Crawler + Catalog + Athena**, as in the EPC project.
 
-### Data sources (both free, no auth needed)
-
-**Carbon Intensity API** — National Grid ESO
-```
-https://api.carbonintensity.org.uk/regional
-```
-Returns live and forecast carbon intensity (gCO₂/kWh) for 14 UK regions, updated every 30 minutes.
-
-**Octopus Agile API** — Octopus Energy
-```
-https://api.octopus.energy/v1/products/AGILE-FLEX-22-11-25/electricity-tariffs/E-1R-AGILE-FLEX-22-11-25-C/standard-unit-rates/
-```
-Returns half-hourly electricity prices (p/kWh) for the next 24 hours. Updated daily at 4pm.
-
-### Tasks
-1. Write a Python client for each API using `requests`. Keep them as clean classes.
-2. Add retry logic with exponential backoff — APIs go down, pipelines shouldn't.
-3. Add logging throughout using Python's `logging` module, not `print()`.
-4. Write unit tests with `pytest` and mock the HTTP calls with `responses` or `httpretty`.
-5. Store raw responses as JSON locally first, before touching any database.
-
-### Key concept to learn: Data contracts
-Define a Pydantic model for each API response. This forces you to think about schema explicitly and catches upstream changes early — a very mature practice.
-
-```python
-from pydantic import BaseModel
-from datetime import datetime
-
-class CarbonReading(BaseModel):
-    region: str
-    timestamp: datetime
-    intensity_actual: float | None
-    intensity_forecast: float
-    index: str  # "low", "moderate", "high", "very high"
-```
+1. Crawl Bronze, register schemas in the Glue Catalog.
+2. Use **partition projection** on the date-partitioned prefixes to avoid constant re-crawling.
+3. Set the Athena query-result location with a lifecycle rule.
+4. Sanity-check the data with SQL before building anything on top.
 
 ---
 
-## Phase 2 — Storage Layer (Days 8–12)
+## Phase 4 — The Point-in-Time Feature Store with dbt (Days 13–20)
 
-**What you'll learn:** PostgreSQL, SQLAlchemy, schema design, idempotent writes.
+**The data-engineering centrepiece.** This is where you spend your difficulty budget.
 
-### Tasks
-1. Run PostgreSQL locally in Docker:
-```yaml
-# docker-compose.yml
-services:
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_DB: smartcharge
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-```
+### Silver models
+- `stg_demand`, `stg_weather_forecast`, `stg_carbon`, `stg_agile` — cleaned, typed, half-hourly-aligned, deduplicated.
 
-2. Design your schema. Think carefully about:
-   - How will you handle late-arriving data?
-   - How will you avoid duplicate inserts? (use `INSERT ... ON CONFLICT DO NOTHING`)
-   - What indexes will you need for time-series queries?
+### Gold: the feature store
+- `feature_store` — one row per `target_ts`, where **every feature respects `issue_ts ≤ prediction_time`**. Features include:
+  - **Lagged demand** (demand at t-48 half-hours, t-1 week — these are known at prediction time)
+  - **Weather forecast** for `target_ts` *as issued* before prediction time (temperature, wind, solar radiation, cloud)
+  - **Calendar** (half-hour of day, day of week, month, bank holiday flag)
+  - **Rolling statistics** of demand computed only over the known past
 
-3. Write SQLAlchemy models and a loader that writes your Pydantic-validated data to Postgres.
-4. Make your writes **idempotent** — running the pipeline twice should produce the same result, not duplicate rows.
+### The hard part, made explicit
+Building lag and rolling features that never peek into the future requires careful window logic keyed on both timestamps. This is exactly the kind of temporal correctness that distinguishes someone who has *used* a feature store from someone who understands *why* point-in-time correctness matters. Document your approach prominently — it's the most impressive engineering in the project.
 
-### Schema to aim for
-```sql
--- Raw carbon intensity readings
-CREATE TABLE carbon_intensity (
-    id SERIAL PRIMARY KEY,
-    region VARCHAR(50) NOT NULL,
-    ts TIMESTAMPTZ NOT NULL,
-    intensity_actual FLOAT,
-    intensity_forecast FLOAT NOT NULL,
-    index VARCHAR(20),
-    ingested_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(region, ts)
-);
+### dbt tests
+- No-future-leakage assertions (e.g. test that no feature's `issue_ts` exceeds its allowed prediction time)
+- `not_null` / `accepted_range` on demand and weather features
+- Freshness tests on the source tables
 
--- Raw Agile price data
-CREATE TABLE agile_prices (
-    id SERIAL PRIMARY KEY,
-    ts TIMESTAMPTZ NOT NULL,
-    price_p_kwh FLOAT NOT NULL,
-    ingested_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(ts)
-);
-```
+Generate `dbt docs` and screenshot the lineage graph.
 
 ---
 
-## Phase 3 — Transformation with dbt (Days 13–18)
+## Phase 5 — The Forecasting Model & Honest Evaluation (Days 21–28)
 
-**What you'll learn:** dbt fundamentals, the transformation layer, testing data, documentation.
+### 5.1 — Baselines first (mandatory)
+- **Seasonal naive:** "demand at target_ts = demand at the same half-hour one week ago." This is a genuinely strong baseline for energy demand — beating it convincingly is the bar.
+- Report MAE / MAPE for the baseline. Every model must beat it.
 
-### Setup
-```bash
-pip install dbt-postgres
-dbt init smartcharge
-```
+### 5.2 — The model
+- **LightGBM** with the point-in-time features, predicting each half-hour out to 7 days. Tree models handle the mixed calendar/weather/lag feature set well and train in minutes — no GPU, no cluster.
+- Forecast all horizons (multi-output, or one model per horizon — discuss the trade-off in your README).
 
-Configure `profiles.yml` to point at your local Postgres.
+### 5.3 — Walk-forward validation (the time-series-correct evaluation)
+**Never random-split time-series data** — it leaks future into training. Use walk-forward (expanding-window) backtesting: train on data up to time T, predict T+1…T+7, roll forward, repeat. This mirrors how the model would actually be used and is the honest way to report accuracy. Being able to explain *why* random k-fold is wrong here is a strong interview signal.
 
-### Tasks
-
-1. **Staging models** — clean and rename the raw tables:
-   - `stg_carbon_intensity.sql`
-   - `stg_agile_prices.sql`
-
-2. **Intermediate models** — join and enrich:
-   - `int_combined_signals.sql` — join carbon and price on timestamp, one row per half-hour slot
-
-3. **Mart models** — business-ready outputs:
-   - `mart_hourly_averages.sql` — hourly rollups per region
-   - `mart_charging_windows.sql` — ranked half-hour slots by a combined "cheapness + greenness" score
-
-4. **Add dbt tests** to every model:
-```yaml
-models:
-  - name: stg_carbon_intensity
-    columns:
-      - name: region
-        tests:
-          - not_null
-      - name: ts
-        tests:
-          - not_null
-          - unique
-      - name: intensity_forecast
-        tests:
-          - not_null
-```
-
-5. **Generate dbt docs**: `dbt docs generate && dbt docs serve` — screenshot this for your portfolio. It looks impressive and shows operational maturity.
-
-### Key concept to learn: The medallion architecture
-Your raw tables are the **Bronze** layer. Staging models are **Silver** (clean, typed, renamed). Mart models are **Gold** (business-ready). Mention this explicitly in your README — it's an industry-standard pattern.
+### 5.4 — Error analysis
+Where does the model struggle? Bank holidays, cold snaps, the further horizons? This analysis is more impressive than a single headline metric and shows genuine ML maturity.
 
 ---
 
-## Phase 4 — Streaming with Kafka (Days 19–24)
+## Phase 6 — Batch Inference & Accuracy Tracking (Days 29–33)
 
-**What you'll learn:** Event streaming concepts, producers, consumers, Kafka in Docker.
+**The honest serving pattern — no live endpoint.**
 
-### Why add streaming?
-The APIs update every 30 minutes. Polling every 30 mins is fine for batch, but streaming lets you react instantly to changes — e.g. carbon suddenly spikes, trigger an alert. It also means you're not dependent on scheduled jobs; consumers process events as they arrive.
+### 6.1 — Scheduled batch inference
+A scheduled job (Lambda if it fits the time/memory limits, else a small Fargate task) that:
+1. Loads the current model artefact from S3.
+2. Pulls the latest point-in-time features.
+3. Generates forecasts for the next 7 days.
+4. Writes them to a `forecasts` table (Parquet on S3, queryable via Athena), stamped with the `issue_ts`.
 
-### Setup — Kafka in Docker
-```yaml
-# Add to docker-compose.yml
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.4.0
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
+Because forecasts are produced on a schedule and stored, **there's no need for an always-on inference endpoint** — the dashboard just reads the latest stored forecast. This is the architectural decision that keeps the ML layer cheap and correct.
 
-  kafka:
-    image: confluentinc/cp-kafka:7.4.0
-    depends_on:
-      - zookeeper
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-```
+### 6.2 — Accuracy tracking (the honest, visual payoff)
+A second scheduled job that, as actuals arrive, joins them to the forecasts that predicted them and computes rolling error metrics. This gives you:
+- A live "forecast vs. actual" record
+- Accuracy-over-time, broken down by horizon
+- The foundation for drift detection / retraining triggers
 
-### Tasks
-1. Write a **producer** that polls the carbon intensity API every 30 minutes and publishes events to a `carbon-intensity` topic.
-2. Write a **consumer** that reads from the topic and writes to Postgres.
-3. Add a second topic `agile-prices` for price events.
-4. Test what happens when the consumer is down — do events queue up and replay when it restarts? (They should. This is one of Kafka's key properties.)
+This is genuine MLOps content *and* the most credible possible demonstration that the model works.
 
-### Key concept to learn: At-least-once vs exactly-once delivery
-Understand why Kafka's default is at-least-once (you might get a duplicate), and why your idempotent DB writes from Phase 2 protect you from that.
+### 6.3 — Retraining loop
+A scheduled training job that retrains on the latest data and promotes the new model only if it beats the incumbent on recent walk-forward error (champion/challenger). Versioned artefacts in S3 with a metadata table.
 
 ---
 
-## Phase 5 — ML Forecasting (Days 25–32)
+## Phase 7 — Orchestration (Days 34–37)
 
-**What you'll learn:** Time-series forecasting, feature engineering, MLflow experiment tracking, model serialisation.
+**Step Functions + EventBridge.**
 
-### The problem
-Predict carbon intensity and electricity price for the **next 12 hours**, per region, so the system can recommend optimal windows before they arrive.
+- **EventBridge** triggers the scheduled pipelines (ingestion, daily feature refresh, batch inference, accuracy update, periodic retraining).
+- **Step Functions** sequences the multi-step flows with error handling and retries, e.g. the retraining state machine: `refresh features → backtest candidate → compare to champion → promote if better → regenerate forecasts → SNS alert on failure`.
+- Wire SNS for failure alerts.
 
-### Tasks
-
-**5.1 — Feature engineering**
-From your dbt mart layer, build a feature table:
-- Hour of day, day of week, month
-- Rolling 3hr / 6hr / 24hr averages of carbon and price
-- Regional dummy variables
-- Lag features (what was the value 1hr, 2hr, 24hr ago?)
-
-**5.2 — Baseline model first**
-Before anything fancy, build a naive baseline: "tomorrow's carbon intensity = today's at the same time." Measure its MAE. Every subsequent model must beat this. This is good ML practice.
-
-**5.3 — Train a real model**
-Use `LightGBM` for price forecasting and `Prophet` for carbon intensity (it handles daily/weekly seasonality well out of the box). Train separate models per region.
-
-**5.4 — Track everything with MLflow**
-```python
-import mlflow
-
-with mlflow.start_run():
-    mlflow.log_params({"model": "lightgbm", "region": "South West", "horizon_hrs": 12})
-    mlflow.log_metric("mae", mae)
-    mlflow.log_metric("rmse", rmse)
-    mlflow.sklearn.log_model(model, "model")
-```
-
-Run MLflow locally: `mlflow ui` — screenshot the experiment comparison view for your portfolio.
-
-**5.5 — Model registry**
-Promote your best model to "Production" in the MLflow model registry. Your serving layer (Phase 6) loads from here.
-
-**5.6 — Nightly retraining job**
-Write a script that retrains the model on the latest 90 days of data and promotes it if it beats the current production model's metrics. This is the core of MLOps.
+> Step Functions + EventBridge + Lambda are effectively free at this scale. Nothing runs between executions.
 
 ---
 
-## Phase 6 — Serving Layer (Days 33–37)
+## Phase 8 — The Live Dashboard (Days 38–42)
 
-**What you'll learn:** FastAPI, REST API design, loading ML models, async Python.
+**Streamlit**, reading stored forecasts and actuals (run locally, or on a small instance only when demoing).
 
-### Build a FastAPI app
-
-```python
-from fastapi import FastAPI
-from pydantic import BaseModel
-
-app = FastAPI(title="Smart Charge API")
-
-class ChargeRecommendation(BaseModel):
-    region: str
-    best_windows: list[dict]
-    current_carbon: float
-    current_price: float
-
-@app.get("/recommend/{region}", response_model=ChargeRecommendation)
-async def get_recommendation(region: str):
-    # Load model from MLflow registry
-    # Run forecast
-    # Rank windows by combined score
-    # Return top 3 windows
-    ...
-```
-
-### The scoring function
-This is where it gets interesting. Combine carbon and price into a single "greenness score":
-
-```python
-def score_window(carbon_forecast: float, price_forecast: float,
-                 carbon_weight: float = 0.5, price_weight: float = 0.5) -> float:
-    """Lower score = better time to charge."""
-    carbon_normalised = carbon_forecast / 500  # UK max ~500 gCO2/kWh
-    price_normalised = price_forecast / 35     # Agile max ~35p/kWh
-    return (carbon_weight * carbon_normalised) + (price_weight * price_normalised)
-```
-
-Making the weights configurable is a nice touch — different users care more about cost vs carbon.
-
-### Tasks
-1. Build the `/recommend/{region}` endpoint
-2. Add a `/current` endpoint showing live carbon and price
-3. Add a `/forecast` endpoint returning the raw 12hr forecast
-4. Add basic input validation and error handling
-5. Write a `Dockerfile` for the API
+- **Live view:** current GB demand against the latest forecast, updating as data arrives — this gives the real-time quality you wanted.
+- **Forecast view:** the next 7 days of predicted demand (and, if built, Agile price), with uncertainty if you add it.
+- **Accuracy view:** rolling forecast error over time, by horizon — the honesty centrepiece. "Day-ahead MAPE is X%; 7-day is Y%."
+- **Optional Octopus framing:** "given the price forecast, here's the cheapest predicted charging window beyond the published horizon."
 
 ---
 
-## Phase 7 — Dashboard (Days 38–42)
+## Phase 9 — Polish, README & Teardown (Days 43–47)
 
-**What you'll learn:** Streamlit, data visualisation, connecting a frontend to a backend API.
+### README
+1. Plain-English pitch + why forecasting is a genuinely hard ML problem.
+2. Architecture diagram.
+3. Quick start (`terraform apply` → run → tear down).
+4. **The service-choice rationale** — especially batch inference over a live endpoint, Lambda over Glue, no streaming, no Redshift. The rejections are the story.
+5. **The point-in-time correctness section** — explain the leakage trap and how you avoided it. This is your strongest engineering signal.
+6. The Octopus framing, with honest boundaries.
+7. "What I'd do differently at scale" — feature store → managed (e.g. SageMaker Feature Store) if data grew; live smart-meter feed → streaming; etc.
 
-### Build a Streamlit dashboard with three views:
-
-**View 1 — Live Now**
-- Current carbon intensity by UK region (choropleth map using `folium`)
-- Current Agile price
-- Simple traffic light: Green / Amber / Red for "charge now?"
-
-**View 2 — 12hr Forecast**
-- Line chart of forecast carbon + price (use `plotly`)
-- Highlighted optimal charging windows
-
-**View 3 — Historical**
-- Rolling 7-day chart of carbon and price patterns
-- "If you'd charged at the optimal window every day this week, you'd have saved X% vs always-on"
-
-The dashboard calls your FastAPI endpoints — it doesn't touch the database directly. This separation of concerns is worth explaining in your README.
+### Teardown runbook + portfolio screenshots
+- Step Functions execution graph (all green)
+- dbt lineage graph
+- The walk-forward backtest results
+- The live dashboard with the accuracy-over-time view
 
 ---
 
-## Phase 8 — Orchestration with Airflow (Days 43–47)
+## How This Maps to the Job Spec & the Cert
 
-**What you'll learn:** DAG design, task dependencies, scheduling, monitoring.
-
-### Run Airflow in Docker
-```bash
-# Use the official docker-compose from Airflow docs
-curl -LfO 'https://airflow.apache.org/docs/apache-airflow/stable/docker-compose.yaml'
-docker compose up airflow-init
-docker compose up
-```
-
-### DAGs to build
-
-**DAG 1 — `ingest_carbon_intensity`**
-Schedule: every 30 minutes
-Tasks: `fetch_api` → `validate_schema` → `publish_to_kafka` → `check_row_count`
-
-**DAG 2 — `ingest_agile_prices`**
-Schedule: daily at 4:30pm (prices drop at 4pm)
-Tasks: `fetch_api` → `validate_schema` → `write_to_postgres` → `run_dbt_models`
-
-**DAG 3 — `retrain_models`**
-Schedule: nightly at 2am
-Tasks: `extract_features` → `train_models` → `evaluate_vs_production` → `promote_if_better` → `alert_on_failure`
-
-### Key thing to add: alerting
-Wire up email or Slack alerts when a DAG fails. Even a stub implementation shows you think about operations, not just development.
+| Job spec / cert area | Where demonstrated |
+|---|---|
+| AWS (S3, Lambda, Glue, Athena, Step Functions, EventBridge) | The whole spine — serverless, right-sized |
+| Terraform | All infra as code, with teardown discipline |
+| Pipelines from diverse sources / APIs | Four continuous ingestion streams |
+| Monitoring, testing, data quality | dbt tests incl. no-leakage assertions, SNS alerts, accuracy tracking |
+| ML infrastructure / MLOps | Walk-forward validation, batch inference, champion/challenger retraining, drift tracking |
+| Distributed processing | *Deliberately omitted — explain why* |
+| Governance | Least-privilege IAM, lifecycle rules, cost guardrails |
+| Decarbonisation mission | Better forecasting → less spinning reserve → lower emissions |
 
 ---
 
-## Phase 9 — Infrastructure with Terraform (Days 48–55)
+## Interview Talking Points
 
-**What you'll learn:** Infrastructure as code, AWS core services, state management, cost governance.
-
-### AWS services to provision
-
-```
-infrastructure/
-├── main.tf
-├── variables.tf
-├── outputs.tf
-├── modules/
-│   ├── networking/     # VPC, subnets, security groups
-│   ├── compute/        # EC2 for Airflow + API
-│   ├── storage/        # S3 buckets (raw, processed, models)
-│   ├── database/       # RDS Postgres
-│   └── iam/            # Roles and policies
-```
-
-### Work through these in order:
-
-**Step 1 — State backend**
-Before writing any resources, set up remote state in S3:
-```hcl
-terraform {
-  backend "s3" {
-    bucket = "smartcharge-terraform-state"
-    key    = "prod/terraform.tfstate"
-    region = "eu-west-2"
-  }
-}
-```
-
-**Step 2 — Networking**
-VPC with public and private subnets across two availability zones. Your RDS goes in the private subnet; only your EC2 can reach it.
-
-**Step 3 — Storage**
-Three S3 buckets: `raw-data`, `processed-data`, `ml-models`. Add lifecycle rules to expire raw data after 90 days — shows cost thinking.
-
-**Step 4 — Compute**
-A single `t3.small` EC2 instance running your Docker Compose stack. Use a `user_data` script to bootstrap Docker and pull your repo on launch.
-
-**Step 5 — Database**
-RDS Postgres `db.t3.micro`. Enable automated backups. Store the password in AWS Secrets Manager and reference it in Terraform — never hardcode credentials.
-
-**Step 6 — IAM**
-Least-privilege roles: your EC2 instance should only have permission to read/write its specific S3 buckets and read from Secrets Manager. Nothing more.
+- *"Why batch inference, not an endpoint?"* → Forecasts are scheduled, not on-demand; an always-on endpoint would be cost for no benefit.
+- *"How did you avoid data leakage?"* → Point-in-time feature store using weather forecasts as issued, never actuals; no-leakage dbt tests; walk-forward validation.
+- *"Why is random k-fold wrong here?"* → It trains on the future to predict the past; walk-forward mirrors real use.
+- *"How do you know the model works?"* → Accuracy tracked against actuals as they arrive, by horizon, beating a seasonal-naive baseline.
+- *"Why no SageMaker / Kinesis / Redshift?"* → The workload didn't justify them; I'd rather not run infrastructure I can't defend.
+- *"How does this matter to Octopus?"* → Demand and price forecasting underpin balancing, tariff-setting, and flexibility — and better forecasts cut both cost and carbon.
 
 ---
 
-### Step 7 — Migrating from Local Docker to RDS
+## Honest Risks to Manage
 
-This is the step that ties Phases 1–8 to Phase 9 together. You've been running Postgres locally in Docker throughout development — now you're promoting the same schema and data to AWS.
-
-**7.1 — Export your local schema**
-Dump just the schema (no data) from your local Postgres:
-```bash
-docker exec -t smartcharge-postgres pg_dump \
-  --schema-only \
-  --no-owner \
-  -U postgres smartcharge > infrastructure/schema.sql
-```
-Commit this file to your repo. It becomes the source of truth for your database structure.
-
-**7.2 — Apply the schema to RDS**
-Once Terraform has provisioned RDS, connect to it via a bastion or SSM session (your EC2 instance) and apply the schema:
-```bash
-psql -h <rds-endpoint> -U postgres -d smartcharge < infrastructure/schema.sql
-```
-
-**7.3 — Seed historical data**
-Export your local data as a CSV and load it into RDS so you're not starting cold:
-```bash
-# Export from local
-docker exec -t smartcharge-postgres psql -U postgres -d smartcharge \
-  -c "\COPY carbon_intensity TO '/tmp/carbon.csv' CSV HEADER"
-
-# Import to RDS
-psql -h <rds-endpoint> -U postgres -d smartcharge \
-  -c "\COPY carbon_intensity FROM '/tmp/carbon.csv' CSV HEADER"
-```
-
-**7.4 — Update your connection string**
-Your app reads the database URL from an environment variable. On EC2, this should come from AWS Secrets Manager rather than a `.env` file:
-```python
-import boto3, json
-
-def get_db_url() -> str:
-    client = boto3.client("secretsmanager", region_name="eu-west-2")
-    secret = client.get_secret_value(SecretId="smartcharge/db")
-    creds = json.loads(secret["SecretString"])
-    return f"postgresql://{creds['username']}:{creds['password']}@{creds['host']}/smartcharge"
-```
-This is a meaningful step up in security maturity from a `.env` file and worth explaining explicitly in your README.
-
-**7.5 — Smoke test**
-Run your Airflow DAGs against the RDS instance and confirm data is flowing end-to-end in the cloud environment. Check that your dbt models run cleanly against the new host. If anything breaks here, it's almost always a networking or IAM permissions issue — check your security group rules and IAM role policies first.
-
-**The key thing to articulate in an interview:** Your local Docker Postgres and your RDS instance are identical in schema — the only differences are where they run and how credentials are managed. This means your code never needed to change, just configuration. That's good software design.
-
-### Cost governance habit to build
-Add this to your README:
-```bash
-# Spin up
-terraform apply
-
-# Tear down when not using
-terraform destroy
-```
-Mention in interviews that you always `terraform destroy` when not actively developing. It shows you think about cost, not just capability.
+1. **The point-in-time logic is the hard part — and the most valuable.** Budget real time for it; it's where the project earns its DE credibility.
+2. **Bootstrapping weather-forecast history — now confirmed viable.** You need *issued* forecasts, not actuals. Open-Meteo's **Previous Runs API** provides exactly this (fixed 1–7 day lead-time offsets), with history from Jan 2024 for most models (GFS from Mar 2021). A couple of years is sufficient — it spans both winters and supports walk-forward validation. Day-one sanity check: pull a Previous Runs forecast at a 3-day offset for one past week, pull the actuals for that week, and confirm the numbers genuinely differ (they should — forecasts are imperfect). If they're identical, something's misconfigured; investigate before building on it.
+3. **Lambda limits for training/inference.** If the job exceeds Lambda's time/memory, move it to a small scheduled Fargate task — cheap, still serverless-ish, no always-on cost.
+4. **Scope discipline.** Build demand forecasting end-to-end first. Add Agile price, uncertainty intervals, and the Octopus charging-window layer only once the core loop works.
 
 ---
 
-## Phase 10 — Polish and Documentation (Days 56–60)
-
-**What you'll learn:** How to present technical work to non-technical stakeholders.
-
-### README structure
-Your README is as important as your code. It should contain:
-
-1. **One-paragraph plain English description** — what it does, why it matters
-2. **Architecture diagram** — use `diagrams` (Python library) or draw.io
-3. **Quick start** — someone should be able to run `docker compose up` and see something working in under 10 minutes
-4. **Component breakdown** — one paragraph per layer explaining the technical choice and why
-5. **What I'd do differently at scale** — Kafka → AWS MSK, local Airflow → MWAA, dbt → dbt Cloud, single model → model ensemble. This section shows you can think beyond a portfolio project.
-6. **Limitations and known issues** — be honest. Interviewers respect self-awareness.
-
-### Things to screenshot for your portfolio
-- The Airflow DAG graph view with all tasks green
-- MLflow experiment comparison showing multiple model runs
-- dbt docs lineage graph (the DAG of your transformation models)
-- The Streamlit dashboard with live data
-- Terraform plan output showing all your AWS resources
-
----
-
-## Learning Resources by Phase
-
-| Phase | Best resource |
-|-------|--------------|
-| dbt | dbt Learn (free, official, excellent) |
-| Kafka | Confluent's free Kafka 101 course |
-| MLflow | Official MLflow docs + this tutorial: mlflow.org/docs/latest/tutorials |
-| Airflow | Astronomer's free learning platform (astronomer.io/learn) |
-| Terraform | HashiCorp's official tutorials (developer.hashicorp.com/terraform/tutorials) |
-| FastAPI | Official FastAPI docs (the best framework docs in Python) |
-| AWS | AWS free tier — just build, the docs are good |
-
----
-
-## Interview Talking Points This Project Gives You
-
-- **"Tell me about a streaming pipeline you've built"** → Kafka producer/consumer, at-least-once delivery, idempotent writes
-- **"How do you ensure data quality?"** → Pydantic contracts at ingestion, dbt tests on every model, Airflow alerting on failure
-- **"Tell me about your ML infrastructure experience"** → MLflow tracking, model registry, automated nightly retraining
-- **"How do you manage infrastructure?"** → Terraform, remote state, least-privilege IAM, lifecycle rules for cost governance
-- **"How would this scale?"** → MSK for Kafka, MWAA for Airflow, partitioned S3, read replicas on RDS — you already know the answer because you designed for it
-
----
-
-*Good luck. Build it in public on GitHub from day one.*
+*Build it in public on GitHub from day one. The point-in-time feature store and the deliberate service choices — including the ones you rejected — are the story.*
