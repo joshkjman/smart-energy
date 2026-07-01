@@ -1,0 +1,2 @@
+openmeteo_requests
+pandas
