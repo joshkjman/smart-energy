@@ -3,3 +3,6 @@ PLAN.md
 energy_project_spec.md
 .venv
 __pycache__
+.terraform/
+*.tfstate
+*.tfstate.*
