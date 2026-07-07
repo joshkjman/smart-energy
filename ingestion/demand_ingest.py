@@ -14,8 +14,11 @@ Developed as a plain local module first; wrapped as a Lambda handler + Terraform
 """
 
 from __future__ import annotations
+from collections import defaultdict
 import datetime as dt
 import requests
+import json
+import pathlib
 
 # TODO: confirm these against the live API (call it, inspect the response) before trusting.
 BASE_URL = "https://data.elexon.co.uk/bmrs/api/v1"
@@ -79,7 +82,7 @@ def bronze_key(settlement_date: dt.date) -> str:
     TODO: return a path like f"{BRONZE_PREFIX}/date={settlement_date:...}/demand.json"
           (pick the partition format — remember how Athena/Glue expect partitions).
     """
-    ...
+    return f"{BRONZE_PREFIX}/date={settlement_date:%Y-%m-%d}/demand.json"
 
 
 def write_bronze(payload: dict, key: str) -> None:
@@ -90,7 +93,10 @@ def write_bronze(payload: dict, key: str) -> None:
       - later: swap for boto3 put_object to the data bucket (SSE on, private)
       - json.dumps the payload; this is the raw landing copy
     """
-    ...
+    path = pathlib.Path(f'data/{key}')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, 'w') as f: 
+        f.write(json.dumps(payload))
 
 
 def main() -> None:
@@ -99,11 +105,24 @@ def main() -> None:
     TODO: choose the date range (for backfill vs. the daily incremental pull),
           then fetch -> validate -> for each settlement date, write_bronze(...).
     """
-    ...
+    date_from = dt.date(2026,6,1)
+    date_to = dt.date(2026,6,1)
+    payload = fetch_demand_outturn(date_from, date_to)
+    validate(payload)
+
+    grouped_day = defaultdict(list)
+    for d in payload['data']:
+        grouped_day[d['settlementDate']].append(d)
+
+    for k, v in grouped_day.items():
+        write_payload = {'data': v}
+        key = bronze_key(dt.date.fromisoformat(k))
+        write_bronze(write_payload, key)
+
 
 
 if __name__ == "__main__":
     main()
 
-payload = fetch_demand_outturn(dt.date(2026,6,1), dt.date(2026,6,1))
-print(validate(payload))
+# payload = fetch_demand_outturn(dt.date(2026,6,1), dt.date(2026,6,1))
+# print(payload)
