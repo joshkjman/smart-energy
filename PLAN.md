@@ -71,7 +71,7 @@ Per the contract in CLAUDE.md, most steps follow this loop — hold me to it:
 
 *Goal: live data flowing into Bronze via scheduled Lambdas. Spec: Phase 2.*
 
-- [ ] Decide the ingestion pattern: one Lambda per source, EventBridge schedules. *Ask me why Lambda over Glue here.*
+- [x] Decide the ingestion pattern: one Lambda per source, EventBridge schedules. **Lambda over Glue** — tiny non-streaming JSON pulls, seconds of Python, no distributed compute; Lambda's sub-second start + per-ms billing beats Spark's minutes-long cluster spin-up + DPU-hour floor. (Glue only right for GB+ distributed transforms.) **One Lambda per source** — independent schedules, failure isolation, and least-privilege IAM (each role scoped to its one API + one S3 prefix).
 - [ ] Write the demand ingestion client (Python — I've got this; you review edge cases).
 - [ ] Write the weather **Previous Runs** ingestion (predictors), stamped by lead offset.
 - [ ] Write the weather **actuals** ingestion (targets).

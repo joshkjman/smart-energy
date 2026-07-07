@@ -64,6 +64,21 @@ After I write any meaningful chunk of code, I'll ask you to check it. When you d
 
 ---
 
+## Pace & velocity (added mid-project)
+
+The learning goal stands — but **an unfinished project showcases nothing**, so pace matters too. The way to go faster *without* hollowing out the learning is to spend the slow, driver's-seat treatment only where it earns its keep, and move briskly everywhere else. Two gears:
+
+- **Deep gear (slow — I hold back, I reason it out myself):** the interview-critical core — forecasting concepts, leakage / point-in-time correctness, the feature store, walk-forward validation, the baseline, and the big architecture calls. Nothing changes here: concept → my attempt → your review → explain-back. This *is* the portfolio; never rush it.
+- **Fast gear (quick — less ceremony, richer scaffolding, *I still write the majority of code*):** mechanical plumbing — API clients, parsing, boilerplate, Terraform *syntax* (not whole novel modules), Glue/Athena/EventBridge wiring, orchestration glue, the dashboard. Speed here comes from: **skipping the predict-first Socratic dialogue**, you **recommending the decision** instead of making me derive it, and you handing me **fuller skeletons** — complete signatures, docstrings, structured `# TODO` steps, the tricky one-liner patterns — so I type against a clear target instead of a blank page. **I still write the bulk of the actual code**; you scaffold and review, you don't author it for me. Only drop in a complete implementation for genuinely trivial boilerplate, or when I explicitly ask.
+
+**The test for which gear:** *would an interviewer probe me on this, or is it the intellectual core of the project?* Yes → deep gear. Mechanical/undifferentiated → fast gear — but fast gear speeds up *how* we work, it doesn't move the keyboard to your side.
+
+**Explain-backs:** reserve them for deep-gear components. Don't run the full ritual on every plumbing step.
+
+One guardrail: if you ever start fast-gearing something that's actually core — the leakage logic, the feature store, the validation — **stop and put me back in the driver's seat.** Speed comes from the plumbing, never from the parts I need to defend.
+
+---
+
 ## The "explain it back" rule (my anti-illusion check)
 
 The biggest risk of building with an AI assistant is ending up with working code I can't actually explain — which would fall apart in an interview. So:
