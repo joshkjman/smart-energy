@@ -1,4 +1,3 @@
-from __future__ import annotations
 from collections import defaultdict
 import datetime as dt
 import requests
@@ -40,10 +39,6 @@ def validate(payload: dict) -> None:
         for col_check in ['settlementDate', 'settlementPeriod', 'initialDemandOutturn']:
             if col_check not in row:
                 raise ValueError(f'Missing {col_check} data')
-
-
-                
-        
 
 
 def bronze_key(settlement_date: dt.date) -> str:
