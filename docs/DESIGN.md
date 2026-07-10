@@ -48,6 +48,8 @@ no guard enforces this yet, and when it actually bites (window overlap).]
 worth recording: backfill melts the ISSUE axis (previous_dayN), live melts the
 VARIABLE axis — same tool, different job.]
 
+the target-row window (past_days→forecast_days), each target's previous-day offsets, issue_ts = target − N, group-by-issue for landing, diagonals-clip-at-the-edge. Keep the two tweaks (N is the offset; each partition's targets sit 0–7 days ahead). And add the one line that makes the melt legitimate rather than "cleaning": the values are never touched — you're just re-indexing the same numbers from a target frame to an issue frame.
+
 ## 7. Partitioning
 
 [Why weather partitions on issue_date (not target date) and demand on settlement

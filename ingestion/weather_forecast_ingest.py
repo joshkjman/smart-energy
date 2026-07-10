@@ -26,7 +26,7 @@ def fetch_previous_runs(past_days: int) -> pd.DataFrame:
     prev_model_params = {
         "latitude": LAT,
         "longitude": LON,
-        "hourly": HOURLY_VARS + [f"{var}_previous_day{n}" for n in range(1, MAX_PREVIOUS_DAY + 1)],
+        "hourly": HOURLY_VARS + [f"{HOURLY_VARS[0]}_previous_day{n}" for n in range(1, MAX_PREVIOUS_DAY + 1)],
         "past_days": past_days,
         "forecast_days": 1,
     }
@@ -51,13 +51,13 @@ def fetch_previous_runs(past_days: int) -> pd.DataFrame:
     return prev_model_hourly_data_df
 
 
-def reshape_to_long(wide: pd.DataFrame, base_run_date: dt.date) -> pd.DataFrame:
+def reshape_to_long(wide: pd.DataFrame) -> pd.DataFrame:
     """Melt the wide previous_dayN columns into long, issue-stamped records.
     """
     long_df = pd.melt(wide, id_vars=['date'])
     long_df.rename(columns={'date': 'target_ts'}, inplace=True)
     long_df['N'] = long_df['variable'].str.extract(r'previous_day(\d+)').fillna(0).astype(int)
-    long_df['issue_ts'] = pd.Timestamp(base_run_date, tz='UTC') - pd.to_timedelta(long_df['N'], unit='days')
+    long_df['issue_ts'] = long_df['target_ts'].dt.normalize() - pd.to_timedelta(long_df['N'], unit='days')
 
     return long_df
 
@@ -84,9 +84,8 @@ def bronze_key(issue_ts: dt.date) -> str:
 def main() -> None:
     """Backfill entry point: fetch -> reshape -> validate -> land per issue_date.
     """
-    prev_model_hourly_data_df = fetch_previous_runs(3)
-
-    long_df = reshape_to_long(prev_model_hourly_data_df, dt.date.today())
+    prev_model_hourly_data_df = fetch_previous_runs(past_days=30)
+    long_df = reshape_to_long(prev_model_hourly_data_df)
     validate(long_df)
     
     for name, group in long_df.groupby('issue_ts'):
