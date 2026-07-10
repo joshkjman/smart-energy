@@ -20,7 +20,7 @@ prevented: what Bronze's job is vs what Gold's job is. Finish the sentence:
 
 target_ts is the time that you want to predict, and issue_ts is the date of the prediction for that certain target_ts.
 Every predictor feature must be knowable as of issue_ts so you can actually predict a target_ts as of issue_ts, and use the historical ones for training.
-Leakage is prevented by using the PREDICTED values and not actual values, because at predict time you only have predicted values not actual values of the future.
+One form of this (weather features) is using predicted not actual values, because at predict time you only have predicted values not actual values of the future.
 Bronze stamps each value with its issue_ts (when it became known), and Gold admits only features passing issue_ts + publication_lag ≤ prediction_time.
 
 ## 3. Why forecasts-as-issued, never actuals
