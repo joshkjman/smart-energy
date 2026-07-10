@@ -1,13 +1,14 @@
 from collections import defaultdict
+from ingestion.bronze_io import write_bronze
 import datetime as dt
 import requests
 import json
 import pathlib
 
-# TODO: confirm these against the live API (call it, inspect the response) before trusting.
+
 BASE_URL = "https://data.elexon.co.uk/bmrs/api/v1"
 DEMAND_OUTTURN_PATH = "/demand/outturn"
-BRONZE_PREFIX = "bronze/demand"  # under the project data bucket
+BRONZE_PREFIX = "bronze/demand"
 
 
 def fetch_demand_outturn(date_from: dt.date, date_to: dt.date) -> dict:
@@ -49,15 +50,6 @@ def bronze_key(settlement_date: dt.date) -> str:
     return f"{BRONZE_PREFIX}/date={settlement_date:%Y-%m-%d}/demand.json"
 
 
-def write_bronze(payload: dict, key: str) -> None:
-    """Persist the raw payload to Bronze at `key`.
-    """
-    path = pathlib.Path(f'data/{key}')
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, 'w') as f: 
-        f.write(json.dumps(payload))
-
-
 def main() -> None:
     """Local entry point: pull a date range and land it. Lambda handler comes later.
     """
@@ -73,7 +65,8 @@ def main() -> None:
     for k, v in grouped_day.items():
         write_payload = {'data': v}
         key = bronze_key(dt.date.fromisoformat(k))
-        write_bronze(write_payload, key)
+        body = json.dumps(write_payload)
+        write_bronze(key, body)
 
 
 
