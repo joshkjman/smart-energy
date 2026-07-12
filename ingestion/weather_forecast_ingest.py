@@ -86,12 +86,13 @@ def main() -> None:
     """
     prev_model_hourly_data_df = fetch_previous_runs(past_days=30)
     long_df = reshape_to_long(prev_model_hourly_data_df)
-    validate(long_df)
+    print(long_df.value_counts('issue_ts'))
+    # validate(long_df)
     
-    for name, group in long_df.groupby('issue_ts'):
-        key = bronze_key(name)
-        body = '{"data":' + group.to_json(orient='records', date_format='iso') + '}'
-        write_bronze(key, body)
+    # for name, group in long_df.groupby('issue_ts'):
+    #     key = bronze_key(name)
+    #     body = '{"data":' + group.to_json(orient='records', date_format='iso') + '}'
+    #     write_bronze(key, body)
 
 
 if __name__ == "__main__":

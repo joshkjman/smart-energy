@@ -1,0 +1,8 @@
+profiles.yml:
+foresight:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: foresight.duckdb
+      threads: 4

@@ -1,0 +1,10 @@
+dbt_project.yml:
+name: foresight
+version: "1.0"
+profile: foresight
+models:
+  foresight:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table
