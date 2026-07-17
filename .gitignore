@@ -4,3 +4,7 @@ __pycache__
 *.tfstate
 *.tfstate.*
 data/
+dbt/foresight.duckdb
+dbt/target/
+dbt/logs/
+dbt/.user.yml
