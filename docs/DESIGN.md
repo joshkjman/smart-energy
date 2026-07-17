@@ -42,6 +42,10 @@ Can't use previous runs for prod hot path because it doesnt have the same availa
 [When both clients can write the same issue_date, who wins and why. Note that
 no guard enforces this yet, and when it actually bites (window overlap).]
 
+I keep the past days api data separate to the live api data, so there shouldn't be an overlap because I only use past days for historical data and then the live data for future/current forecasts.
+The data written first is the data that will remain in the issue_date folder. I avoid overlapping by only allowing write_bronze to write in empty/non-existent issue_date subfolders.
+If the data is actually wrong and I want to overwrite it, I delete it first then write again with the correct data. This only works with the weather forecast, which has to be reflected in write_bronze.
+
 ## 6. The wide -> long reshape (melt)
 
 [Why the melt is a legitimate Bronze operation and not "cleaning". The subtlety
