@@ -2,7 +2,7 @@ version: 2
 sources:
   - name: bronze
     meta:
-      external_location: "data/bronze/demand/**/*.json"   # {name} → the table name below
+      external_location: "../data/bronze/{name}/**/*.json"   # {name} → the table name below
     tables:
       - name: demand
-      # weather_forecast, bank_holidays later
+      - name: weather_forecast
