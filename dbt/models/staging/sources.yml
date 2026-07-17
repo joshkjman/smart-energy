@@ -6,3 +6,4 @@ sources:
     tables:
       - name: demand
       - name: weather_forecast
+      - name: bank_holidays

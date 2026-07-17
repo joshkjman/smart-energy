@@ -17,8 +17,17 @@ models:
       - name: target_ts
         description: Target date that the prediction was made for
       - name: issue_ts
-        description: When that prediction was made for that particular target date
+        description: The date that prediction was made for that particular target date
       - name: variable
         description: The variable being measured
       - name: value
         description: Value of variable that is measured
+  - name: stg_bank_holidays
+    description: staging table for bank holiday data
+    columns:
+      - name: holiday_date
+        description: Date of bank holiday
+      - name: title
+        description: Title/Name of that bank holiday
+      - name: division
+        description: The region that bank holiday date applies to
