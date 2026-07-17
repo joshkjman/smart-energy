@@ -3,8 +3,10 @@ with raw as (
     from {{ source('bronze', 'demand') }}
 )
 select
-    -- TODO: project r.settlementDate, r.settlementPeriod, r.initialDemandOutturn, etc.
-    -- TODO: cast the timestamps (startTime / publishTime) to proper TIMESTAMP
-    -- TODO: rename to snake_case column names you want in Silver
-    -- think: what's the grain here, and what do you actually need downstream?
+    r.publishTime at time zone 'UTC' as publish_time,
+    r.startTime at time zone 'UTC' as start_time,
+    r.settlementDate as settlement_date,
+    r.settlementPeriod as settlement_period,
+    r.initialDemandOutturn as initial_demand_outturn,
+    r.initialTransmissionSystemDemandOutturn as initial_transmission_system_demand_outturn,
 from raw

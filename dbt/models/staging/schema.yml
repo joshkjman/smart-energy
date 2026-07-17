@@ -1,0 +1,24 @@
+version: 2
+models:
+  - name: stg_demand
+    description: staging table for demand data
+    columns:
+      - name: start_time
+        description: This is from the startTime field from Elexon's API data, given in UTC timezone.
+        data_tests:
+          - not_null
+          - unique
+      - name: initial_demand_outturn
+        data_tests:
+          - not_null
+  - name: stg_weather_forecast
+    description: staging table for weather forecast data
+    columns:
+      - name: target_ts
+        description: Target date that the prediction was made for
+      - name: issue_ts
+        description: When that prediction was made for that particular target date
+      - name: variable
+        description: The variable being measured
+      - name: value
+        description: Value of variable that is measured
