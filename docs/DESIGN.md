@@ -11,6 +11,8 @@ Running record of the *why* behind the architecture. Not a status tracker
 (land faithfully, no cleaning). Where does typing/dedup happen? Where do
 features get built?]
 
+Bronze = raw JSON (dbt sources), Silver = staging/, Gold = marts/.
+
 ## 2. Point-in-time correctness (the core constraint)
 
 [The two timestamps — target_ts vs issue_ts — in your own words. Why every

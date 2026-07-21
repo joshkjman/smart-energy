@@ -1,6 +1,10 @@
 name: foresight
 version: "1.0"
 profile: foresight
+
+vars:
+  publication_lag_hours: 24
+
 models:
   foresight:
     staging:
