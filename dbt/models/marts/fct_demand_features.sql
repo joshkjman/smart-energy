@@ -25,25 +25,31 @@ labelled as (
             d.initial_demand_outturn
     from weather_wide w
     left join demand_hourly d on w.target_ts = d.target_hour
-)
-select *
-from labelled
-
+),
 -- calendar as (
 --     -- TODO: features from the target itself
 --     --   is target a bank holiday? (join stg_bank_holidays on holiday_date = target_ts::date, pick division)
 --     --   hour, day-of-week from target_ts
 --     select ...
 -- ),
-
--- lagged as (
---     -- TODO (THE hard one — you write this, it's the leakage guard):
---     --   cutoff = target_ts - lead - publication_lag        (use {{ var('publication_lag_hours') }})
---     --   lag_1 = the most recent demand where start_time <= cutoff
---     --   shape: non-equi. correlated/LATERAL subquery, or qualify row_number() over (order by start_time desc)
---     --   RULES: join with <=, never =. anchor to the cutoff, never to target_ts.
---     select ...
--- )
+cutoff_data as (
+    select *,
+        (target_ts - lead_days * interval '1 day' - interval {{ var('publication_lag_hours') }} hour) as cutoff
+    from labelled
+),
+lagged as (
+    -- TODO (THE hard one — you write this, it's the leakage guard):
+    --   cutoff = target_ts - lead - publication_lag        (use {{ var('publication_lag_hours') }})
+    --   lag_1 = the most recent demand where start_time <= cutoff
+    --   shape: non-equi. correlated/LATERAL subquery, or qualify row_number() over (order by start_time desc)
+    --   RULES: join with <=, never =. anchor to the cutoff, never to target_ts.
+    select *
+    from cutoff_data c
+    asof left join demand_hourly d
+    on d.target_hour <= c.cutoff
+)
+select *
+from lagged
 
 -- select
 --     -- keys: target_ts, lead
