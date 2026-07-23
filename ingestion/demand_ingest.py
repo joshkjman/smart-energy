@@ -53,8 +53,8 @@ def bronze_key(settlement_date: dt.date) -> str:
 def main() -> None:
     """Local entry point: pull a date range and land it. Lambda handler comes later.
     """
-    date_from = dt.date(2026,6,1)
-    date_to = dt.date(2026,6,1)
+    date_from = dt.date(2026,7,8)
+    date_to = dt.date(2026,7,11)
     payload = fetch_demand_outturn(date_from, date_to)
     validate(payload)
 
