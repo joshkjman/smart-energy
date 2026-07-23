@@ -72,12 +72,12 @@ Per the contract in CLAUDE.md, most steps follow this loop — hold me to it:
 *Goal: live data flowing into Bronze via scheduled Lambdas. Spec: Phase 2.*
 
 - [x] Decide the ingestion pattern: one Lambda per source, EventBridge schedules. **Lambda over Glue** — tiny non-streaming JSON pulls, seconds of Python, no distributed compute; Lambda's sub-second start + per-ms billing beats Spark's minutes-long cluster spin-up + DPU-hour floor. (Glue only right for GB+ distributed transforms.) **One Lambda per source** — independent schedules, failure isolation, and least-privilege IAM (each role scoped to its one API + one S3 prefix).
-- [ ] Write the demand ingestion client (Python — I've got this; you review edge cases).
-- [ ] Write the weather **Previous Runs** ingestion (predictors), stamped by lead offset.
+- [x] Write the demand ingestion client (Python — I've got this; you review edge cases). *(Elexon `initialDemandOutturn`; range-capable via `fetch_demand_outturn(from, to)`, 28-day API cap handled by chunking; writes one file per settlement date.)*
+- [~] Write the weather **Previous Runs** ingestion (predictors), stamped by lead offset. *(Client + `reshape_to_long` written; write-loop + `validate()` still commented out, and it's not yet range-capable (`past_days` relative to today). Deferred until backfill.)*
 - [ ] Write the weather **actuals** ingestion (targets).
 - [ ] Write carbon intensity + Agile price ingestion.
 - [ ] Add Pydantic validation / data contracts to each. *Ask me what should happen when validation fails.*
-- [ ] Backfill historical data to bootstrap training (Previous Runs archive).
+- [~] Backfill historical data to bootstrap training (Previous Runs archive). *(Only a 32-day demand sliver (2026-06-10 → 07-11) pulled locally to unblock the Gold join. Full 12–24 month weather + demand backfill still to do — the real blocker before baseline/validation.)*
 - [ ] Write the Lambda + EventBridge + IAM in Terraform. *I write the HCL; you correct syntax. Security pass on the IAM roles — make me justify each permission.*
 - [ ] **Explain-back:** why is each ingestion write idempotent, and how?
 
@@ -99,13 +99,15 @@ Per the contract in CLAUDE.md, most steps follow this loop — hold me to it:
 
 *Goal: the engineering centrepiece — leakage-safe features. Spec: Phase 4. Go slow here.*
 
-- [ ] Set up the dbt-athena project. *(I use dbt at work — light help.)*
-- [ ] Build Silver staging models (clean, typed, half-hourly-aligned, deduplicated). *I write the SQL; you review.*
-- [ ] Build the Gold feature store. **This is the hard part.** *I design the point-in-time join logic myself; you only review for leakage. Do NOT write this for me.*
-- [ ] Engineer lag features and rolling stats that never peek into the future. *Make me reason through each one's `issue_ts` constraint.*
-- [ ] Add dbt tests, including no-future-leakage assertions.
+> **Note — intentional reorder:** the dbt modelling was built **first, locally on DuckDB**, ahead of the Phase 2/3 AWS ingestion + Athena wiring. This let the leakage-critical logic get proven and understood without waiting on infra. The models are portable SQL; porting the project to `dbt-athena` (adapter + sources pointing at the Glue catalog instead of local files) is still outstanding and belongs with Phase 3.
+
+- [~] Set up the dbt project. *(Done on **dbt-duckdb** locally, not dbt-athena yet — see note above.)*
+- [x] Build Silver staging models (clean, typed, half-hourly-aligned, deduplicated). *3 models: `stg_demand`, `stg_weather_forecast` (pivoted long→wide), `stg_bank_holidays` (E&W + Scotland unioned). Tests: not-null/unique on keys, temp validity bounds, holiday grain.*
+- [x] Build the Gold feature store. **This is the hard part.** *`fct_demand_features`, grain `(target_ts, lead_days)`. Weather rides the grain (`issue_ts = target − lead`) for free point-in-time correctness; label joined at target (demand aggregated half-hourly→hourly).*
+- [x] Engineer lag features and rolling stats that never peek into the future. *`demand_lag_mw` via ASOF join at `cutoff = target − lead − publication_lag`. (Rolling stats not yet added — single lag for now.)*
+- [~] Add dbt tests, including no-future-leakage assertions. *Compound-grain uniqueness + not-nulls on keys/label done. The leakage guard is currently proven **structurally** (grain enforces it) rather than by an explicit assertion test — worth adding one.*
 - [ ] Generate dbt docs; screenshot the lineage graph.
-- [ ] **Explain-back:** pick any feature and make me prove it can't leak.
+- [x] **Explain-back:** pick any feature and make me prove it can't leak. *(Done — weather-vs-demand asymmetry: forecast legal-at-target vs actual forbidden-at-target; demand's sliding cutoff + ASOF.)*
 
 ---
 
@@ -178,7 +180,12 @@ Per the contract in CLAUDE.md, most steps follow this loop — hold me to it:
 
 - **Scope confirmed:** core model forecasts *national GB-aggregate* demand (ESO is the clean labelled target). Regional = harder/noisier (later); household (dad's Octopus) = analysis stretch, not a forecast.
 - **Weather model = GFS.** Deep history > local resolution for a national target + walk-forward backtest. Multi-city weather = *feature sources* blended into one national signal, not separate targets.
-- **TO VERIFY (don't assume):** how far back the GFS Previous Runs archive actually reaches on Open-Meteo — confirm it gives enough years/seasons before committing to a training window. (Same discipline as the Phase 0 data-premise check.)
+- **TO VERIFY (don't assume):** how far back the GFS Previous Runs archive actually reaches on Open-Meteo — confirm it gives enough years/seasons before committing to a training window. (Same discipline as the Phase 0 data-premise check.) *(Checked: archive reaches ~Jan 2024 for most models, GFS 2m-temp back to Mar 2021 — 2+ years available, not the binding constraint.)*
+- **`publication_lag_hours` is a placeholder (`24`) in `dbt_project.yml`.** It directly sets the demand-lag leakage cutoff. Elexon publishes `initialDemandOutturn` well under a day after each settlement period — verify the real lag and document the justification in DESIGN before trusting the guard.
+- **Ownership rule resolved (DESIGN §5):** live vs backfill weather writes collide at the file level (identical `issue_date` path, last-writer-wins). Defence = disjoint ranges by construction + per-client write-once guard (weather fail-closed; demand permissive since outturn gets revised) + delete-to-correct as the deliberate escape hatch. The grain uniqueness test is **not** the backstop (collision resolves before dbt reads).
+- **`is_holiday` is all-`false` in the current window** — no E&W bank holiday falls in 10 Jun–11 Jul 2026. Expected, not a bug; the column exercises once the data window spans a real holiday. Division decision: filtered to `eng&wales` (dominates GB demand).
+- **Local dev tip:** DuckDB is a single file (`dbt/foresight.duckdb`); can browse in DBeaver (read-only driver prop to coexist with `dbt run`), or `dbt compile` + open `target/compiled/.../fct_demand_features.sql` to step through CTEs.
+- **Next-session fork:** either (a) do the deferred weather+demand **backfill** (unblocks everything downstream — 12–24 months), or (b) keep building **baseline + walk-forward** logic against the small local set and backfill later. Baseline/validation only become *meaningful* with ≥12 months (annual cycle), so the backfill is the more honest next step.
 - 
 
 ---
