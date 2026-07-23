@@ -1,0 +1,28 @@
+version: 2
+models:
+  - name: fct_demand_features
+    description: One row per (target_ts, lead_days) training example; every predictor knowable as of prediction_time
+    columns:
+      - name: target_ts
+        description: Time that you want to predict
+        data_tests:
+          - not_null
+      - name: lead_days
+        description: Days before target_ts that your issue_ts starts on, where you run weather model prediction
+        data_tests:
+          - not_null
+      - name: demand_mw
+        description: Demand at target_ts
+        data_tests:
+          - not_null
+      - name: demand_lag_mw
+        description: Demand at issue_ts (target_ts - lead_days) but also with the publication lag applied -> latest legal demand you can see
+        data_tests:
+          - not_null
+      - name: is_holiday
+        description: Bool of whether target_ts is a holiday
+        data_tests:
+          - not_null
+      - name: day
+        description: day-of-week 0–6, Sun–Sat
+        
