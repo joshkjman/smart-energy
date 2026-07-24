@@ -20,15 +20,15 @@ MAX_PREVIOUS_DAY = 7
 openmeteo = openmeteo_requests.Client()
 
 
-def fetch_previous_runs(past_days: int) -> pd.DataFrame:
-    """Pull Previous Runs for the last `past_days` and return a WIDE dataframe.
+def fetch_previous_runs(start_date: dt.date, end_date: dt.date) -> pd.DataFrame:
+    """Pull Previous Runs between start_date and end_date, and return a WIDE dataframe.
     """
     prev_model_params = {
         "latitude": LAT,
         "longitude": LON,
         "hourly": HOURLY_VARS + [f"{HOURLY_VARS[0]}_previous_day{n}" for n in range(1, MAX_PREVIOUS_DAY + 1)],
-        "past_days": past_days,
-        "forecast_days": 1,
+        "start_date": f"{start_date:%Y-%m-%d}",
+        "end_date":   f"{end_date:%Y-%m-%d}",
     }
     prev_model_responses = openmeteo.weather_api(PREV_RUNS_URL, params = prev_model_params)
     prev_model_response = prev_model_responses[0]
@@ -80,19 +80,31 @@ def bronze_key(issue_ts: dt.date) -> str:
     return f"{BRONZE_PREFIX}/issue_date={issue_ts:%Y-%m-%d}/forecast.json"
 
 
+def daterange_chunks(start: dt.date, end: dt.date, chunk_days: int):
+    """Yield (chunk_start, chunk_end) inclusive windows, each ≤ chunk_days wide.
+    Last window clamps to `end`."""
+    cur = start
+    while cur <= end:
+        hi = min(cur + timedelta(days=(chunk_days - 1)) , end)
+        yield (cur, hi)
+        cur = hi + timedelta(days=1)
+
 
 def main() -> None:
     """Backfill entry point: fetch -> reshape -> validate -> land per issue_date.
     """
-    prev_model_hourly_data_df = fetch_previous_runs(past_days=30)
-    long_df = reshape_to_long(prev_model_hourly_data_df)
-    print(long_df.value_counts('issue_ts'))
-    # validate(long_df)
-    
-    # for name, group in long_df.groupby('issue_ts'):
-    #     key = bronze_key(name)
-    #     body = '{"data":' + group.to_json(orient='records', date_format='iso') + '}'
-    #     write_bronze(key, body)
+    backfill_start = dt.date(2024,7,1)
+    backfill_end = dt.date(2026,7,11)
+    for low, high in daterange_chunks(backfill_start, backfill_end, 30): # calls function on every iteration, with yield, returning one date range at a time
+        prev_model_hourly_data_df = fetch_previous_runs(low, high)
+        long_df = reshape_to_long(prev_model_hourly_data_df)
+        print(long_df.value_counts('issue_ts'))
+        validate(long_df)
+        
+        for name, group in long_df.groupby('issue_ts'):
+            key = bronze_key(name)
+            body = '{"data":' + group.to_json(orient='records', date_format='iso') + '}'
+            write_bronze(key, body)
 
 
 if __name__ == "__main__":

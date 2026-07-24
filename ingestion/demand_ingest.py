@@ -4,6 +4,7 @@ import datetime as dt
 import requests
 import json
 import pathlib
+from datetime import timedelta
 
 
 BASE_URL = "https://data.elexon.co.uk/bmrs/api/v1"
@@ -50,23 +51,34 @@ def bronze_key(settlement_date: dt.date) -> str:
     return f"{BRONZE_PREFIX}/date={settlement_date:%Y-%m-%d}/demand.json"
 
 
+def daterange_chunks(start: dt.date, end: dt.date, chunk_days: int):
+    """Yield (chunk_start, chunk_end) inclusive windows, each ≤ chunk_days wide.
+    Last window clamps to `end`."""
+    cur = start
+    while cur <= end:
+        hi = min(cur + timedelta(days=(chunk_days - 1)) , end)
+        yield (cur, hi)
+        cur = hi + timedelta(days=1)
+
+
 def main() -> None:
     """Local entry point: pull a date range and land it. Lambda handler comes later.
     """
-    date_from = dt.date(2026,7,8)
-    date_to = dt.date(2026,7,11)
-    payload = fetch_demand_outturn(date_from, date_to)
-    validate(payload)
+    backfill_start = dt.date(2024,7,1)
+    backfill_end = dt.date(2026,7,11)
+    for low, high in daterange_chunks(backfill_start, backfill_end, 28): # calls function on every iteration, with yield, returning one date range at a time
+        payload = fetch_demand_outturn(low, high)
+        validate(payload)
 
-    grouped_day = defaultdict(list)
-    for d in payload['data']:
-        grouped_day[d['settlementDate']].append(d)
+        grouped_day = defaultdict(list)
+        for d in payload['data']:
+            grouped_day[d['settlementDate']].append(d)
 
-    for k, v in grouped_day.items():
-        write_payload = {'data': v}
-        key = bronze_key(dt.date.fromisoformat(k))
-        body = json.dumps(write_payload)
-        write_bronze(key, body)
+        for k, v in grouped_day.items():
+            write_payload = {'data': v}
+            key = bronze_key(dt.date.fromisoformat(k))
+            body = json.dumps(write_payload)
+            write_bronze(key, body)
 
 
 
