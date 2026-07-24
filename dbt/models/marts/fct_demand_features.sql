@@ -2,16 +2,11 @@
 -- One row per (target_ts, lead) = one training example.
 -- Invariant: every predictor must be knowable as of prediction_time = target_ts - lead.
 
-with pivoted as (
+
+with weather_wide as (
     pivot {{ ref('stg_weather_forecast') }}
     on variable
     using first(value)
-),
-weather_wide as (
-    select
-        *,
-        extract('day' from target_ts - issue_ts) as lead_days
-    from pivoted
 ),
 demand_hourly as (
     select
@@ -53,5 +48,7 @@ select
     demand_mw,
     demand_lag_mw,
     holiday_date is not null as is_holiday,
-    variable
+    temperature_2m
 from calendar
+where demand_mw is not null
+and demand_lag_mw is not null
