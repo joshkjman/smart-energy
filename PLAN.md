@@ -40,6 +40,17 @@ Per the contract in CLAUDE.md, most steps follow this loop — hold me to it:
 
 ---
 
+## Build strategy (revised mid-project) — prove the core locally, then productionize
+
+The phases below are numbered in a logical dependency order, but we are **not** executing them as a strict infra-first waterfall. The leakage-critical dbt modelling was (correctly) built first on **local DuckDB**, and we're leaning into that. Two tracks:
+
+- **Track A — the analytical core, all local (DuckDB):** backfill 12–24 months → seasonal-naive baseline → walk-forward validation → model that beats baseline → a simple accuracy-by-horizon result. This is the entire interview-defining story and needs **zero AWS**. Finish this first so that even in the worst case there's a complete, defensible ML result.
+- **Track B — productionization onto AWS:** ingestion Lambdas + EventBridge, Glue/Athena catalog, `dbt-athena` port, batch inference, Step Functions. This *wraps* a known-working core and is narrated as "how I'd operationalize it" — a strength, not a prerequisite.
+
+**Rule:** don't sink sessions into Track B (Glue crawlers, Step Functions, IAM) until Track A produces a model that beats baseline. An unfinished analytical core showcases nothing; a local-but-complete one showcases everything. Map to phases: Track A ≈ finish 2 (backfill only) → 4 → 5. Track B ≈ rest of 2 → 3 → 6 → 7. Then 8/9.
+
+---
+
 ## Phase 0 — Foundations & Cost Guardrails
 
 *Goal: make a surprise bill impossible and set up the repo. Spec: Phase 0.*
