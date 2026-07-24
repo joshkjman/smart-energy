@@ -205,6 +205,8 @@ The phases below are numbered in a logical dependency order, but we are **not** 
 
 Don't gold-plate. The first pass is **done** when: demand forecasting runs end-to-end, beats the seasonal-naive baseline, is validated walk-forward, deploys and tears down cleanly on AWS, and the README is honest and complete. The Agile-price extension, uncertainty intervals, and the Octopus charging-window layer are **stretch goals** — mention them as "next steps," don't let them block a finished first pass.
 
+> **Feature idea parked for the Agile-price extension — gas/oil prices.** Gas price is a *premier* feature for forecasting electricity **price** (gas plants set the marginal price via merit order, so wholesale gas ≈ the price signal), so it belongs in the Agile-price stretch goal. But it's a **weak/noisy feature for the demand core** — short-run demand is price-inelastic, retail tariffs are capped/lagged so consumers never see the wholesale signal at a 1–7 day horizon, and it's one flat scalar per day so it can't help the intraday shape or weekly deviations that give the edge. Point-in-time legal (market data, published continuously), but fails on *signal*, not legality. General lesson: a feature needs a plausible causal story **at the specific target and horizon** — "it's energy-related" isn't enough.
+
 ### Stretch goal: household tariff analysis (real consumption data)
 
 Using my dad's Octopus account (with his permission), pull the house's half-hourly smart-meter consumption via the authenticated Octopus API and join it against Agile half-hourly prices to answer: *what would this house have paid on Agile vs. the current tariff, and what would load-shifting save?* Notes to hold me to when we get here:
