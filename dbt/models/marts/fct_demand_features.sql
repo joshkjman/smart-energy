@@ -33,11 +33,22 @@ lagged as (
     asof left join demand_hourly d
     on d.target_hour <= c.cutoff
 ),
+seasonal_naive as (
+    select
+        l.*,
+        case
+            when (l.target_ts - interval '168 hours') <= cutoff then d7.initial_demand_outturn
+            else null
+        end as lag_7d
+    from lagged l
+    left join demand_hourly d7
+      on d7.target_hour = (l.target_ts - interval '168 hours')
+),
 calendar as (
     select *
-    from lagged l
+    from seasonal_naive s
     left join {{ ref('stg_bank_holidays') }} b
-    on l.target_ts::date = b.holiday_date
+    on s.target_ts::date = b.holiday_date
     and division = 'eng&wales'
 )
 select
@@ -47,6 +58,7 @@ select
     lead_days,
     demand_mw,
     demand_lag_mw,
+    lag_7d,
     holiday_date is not null as is_holiday,
     temperature_2m
 from calendar
