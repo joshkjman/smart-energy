@@ -39,10 +39,16 @@ seasonal_naive as (
         case
             when (l.target_ts - interval '168 hours') <= cutoff then d7.initial_demand_outturn
             else null
-        end as lag_7d
+        end as lag_7d,
+        case
+            when (l.target_ts - interval '336 hours') <= cutoff then d14.initial_demand_outturn
+            else null
+        end as lag_14d
     from lagged l
     left join demand_hourly d7
       on d7.target_hour = (l.target_ts - interval '168 hours')
+    left join demand_hourly d14
+      on d14.target_hour = (l.target_ts - interval '336 hours')
 ),
 calendar as (
     select *
@@ -59,6 +65,7 @@ select
     demand_mw,
     demand_lag_mw,
     lag_7d,
+    lag_14d,
     holiday_date is not null as is_holiday,
     temperature_2m
 from calendar
