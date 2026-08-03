@@ -3,7 +3,12 @@ version: "1.0"
 profile: foresight
 
 vars:
-  publication_lag_hours: 24
+  # How stale a demand reading must be before we may treat it as knowable.
+  # Measured 2026-08-03: Elexon publishes initialDemandOutturn ~10 min after a
+  # settlement period ends. But demand_hourly buckets on the hour's START, so a
+  # bucket isn't complete until 60 min (rest of hour) + ~10 min ≈ 1h10m after its
+  # label. Rounded up to 2h for margin.
+  publication_lag_hours: 2
 
 models:
   foresight:
