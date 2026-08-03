@@ -67,7 +67,9 @@ select
     lag_7d,
     lag_14d,
     holiday_date is not null as is_holiday,
-    temperature_2m
+    temperature_2m,
+    greatest({{ var('base_temperature') }} - temperature_2m, 0) as heating_degrees,
+    greatest(temperature_2m - {{ var('base_temperature') }}, 0) as cooling_degrees
 from calendar
 where demand_mw is not null
 and demand_lag_mw is not null

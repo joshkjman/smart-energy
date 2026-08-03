@@ -9,6 +9,8 @@ vars:
   # bucket isn't complete until 60 min (rest of hour) + ~10 min ≈ 1h10m after its
   # label. Rounded up to 2h for margin.
   publication_lag_hours: 2
+  # The UK convention for degree-days
+  base_temperature: 15.5
 
 models:
   foresight:
