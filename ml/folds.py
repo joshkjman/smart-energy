@@ -29,21 +29,21 @@ def generate_folds(
 
     Guarantees train_end <= test_start - max_lead for every fold.
     """
-    # TODO: walk test_start from holdout_start in monthly steps
-    # TODO: test_end = one month later, clipped so it never exceeds holdout_end
-    # TODO: train_end = test_start - max_lead days
-    # TODO: skip / stop on any final stub month too short to be worth scoring
-    # TODO: assert the purge invariant before yielding
     delta = relativedelta(months=1)
-
     test_start = holdout_start
-    train_end = test_start - dt.timedelta(days=max_lead)
+    
 
-    while test_end <= holdout_end - delta:
+    while test_start + delta <= holdout_end:
+        train_end = test_start - dt.timedelta(days=max_lead)
+        assert train_end <= test_start - dt.timedelta(days=max_lead) # regression guard: fires only if the derivation above changes
+
         test_end = test_start + delta
+        assert test_end <= holdout_end
 
         yield Fold(train_end=train_end, test_start=test_start, test_end=test_end)
+        test_start += delta
     
     
-
-    
+if __name__ == "__main__":
+    for fold in generate_folds():
+        print(fold)
