@@ -49,11 +49,11 @@ def rmse(actual, predicted) -> float:
     return np.sqrt(total / len(actual))
 
 
-def score_by_lead(df) -> pd.DataFrame:
+def score_by_lead(df, score_prediction='baseline_prediction') -> pd.DataFrame:
     """One row per lead_days: n_scored, rmse, and mean demand
     (so the RMSE is interpretable as a % of typical load)."""
     def score_group(g):
-        error = rmse(g['demand_mw'], g['demand_prediction'])
+        error = rmse(g['demand_mw'], g[score_prediction])
         mean_demand = g['demand_mw'].mean()
         return pd.Series({
             "n": len(g),
@@ -72,8 +72,9 @@ def main():
     df = load_holdout(con)
     con.close()
 
-    df['demand_prediction'] = baseline_prediction(df)
-    df.dropna(subset=['demand_prediction'], inplace=True)
+    df['baseline_prediction'] = baseline_prediction(df)
+    # some rows are missing any legal anchor from either lag_7d or lag_14d
+    df.dropna(subset=['baseline_prediction'], inplace=True)
     grouped_df = score_by_lead(df)
 
     print(grouped_df)
