@@ -13,7 +13,7 @@ Foresight forecasts GB electricity demand **1–7 days ahead** — at the horizo
 
 The project is built to demonstrate **data-engineering judgement**, not just model accuracy. The interesting parts are the point-in-time-correct feature store (no peeking at the future) and the deliberate, defensible AWS service choices — including the services I *didn't* use.
 
-<!-- TODO: one line on actual results once trained, e.g. "Beats a seasonal-naive baseline by X% MAPE at day-ahead, Y% at 7-day." -->
+Current results: the model beats a seasonal-naive baseline by **23–44%** at every horizon under walk-forward validation. See [Results](#results).
 
 ---
 
@@ -123,13 +123,38 @@ terraform destroy
 
 ## Results
 
-<!-- TODO: fill in once the model is trained and backtested -->
+**Validation:** walk-forward, expanding window — 12 monthly folds over Jul 2025 – Jun 2026, with a **7-day purge** between each fold's training cutoff and its test window. The purge exists because a model fitted at `train_end` is used to predict targets up to 7 days beyond it; without it, the last week of training would contain labels that had not been published yet at the fold's earliest prediction time. No random splits.
 
-- **Baseline (seasonal-naive):** MAPE — TBD
-- **Model (LightGBM):** MAPE by horizon — TBD
-- **Validation:** walk-forward (expanding window) — no random splits, because that leaks the future into training
+**Baseline:** seasonal-naive — demand at the same hour on the most recent *legal* same-weekday anchor (`lag_7d`, or `lag_14d` at lead 7, where the publication lag makes a 7-day anchor unknowable).
 
-<!-- TODO: add the accuracy-over-time chart and an error-analysis note (where does it struggle — bank holidays? cold snaps? longer horizons?) -->
+Error is RMSE as a percentage of mean demand. Both rows are scored on identical target timestamps.
+
+| Lead (days) | Baseline | LightGBM | Improvement |
+|---|---|---|---|
+| 0 | 11.39% | **6.41%** | −44% |
+| 1 | 11.30% | **8.04%** | −29% |
+| 2 | 11.23% | **8.15%** | −27% |
+| 3 | 11.13% | **8.20%** | −26% |
+| 4 | 11.07% | **8.48%** | −23% |
+| 5 | 11.04% | **8.47%** | −23% |
+| 6 | 11.00% | **8.45%** | −23% |
+| 7 | 12.33% | **8.96%** | −27% |
+
+The model is given the baseline's own anchors as features, so the baseline is a degenerate case of the model rather than a competitor with different information. Beating it means the remaining features carry *signal* beyond the anchor.
+
+### What the weather forecast is worth
+
+Removing the three weather features (`temperature_2m` and the HDD/CDD hinges) and re-running:
+
+| Lead (days) | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| Error added by removing weather (pp) | +0.11 | +0.48 | +0.63 | +0.59 | +0.78 | +0.90 | +0.89 |
+
+Weather barely moves the average error — what it does is **flatten the degradation curve across the horizon**. Error growth from lead 1 to lead 6 is +0.41pp with weather and +1.20pp without. At short leads a recent demand reading carries almost everything; by day 6 it is stale and the issued forecast is the only genuinely forward-looking input left. That is the entire justification for the point-in-time weather pipeline.
+
+At lead 0 the weather features make the model *worse* (5.90% → 6.41%): with a 2-hour-old demand reading available they add little beyond noise. One pooled model across all leads cannot spend its capacity differently per horizon, so the splits it needs at lead 7 cost it something at lead 0 — a measured trade-off of pooling rather than an assumed one.
+
+<!-- TODO: add the accuracy-over-time chart and an error-analysis note (where does it struggle — bank holidays? cold snaps?) -->
 
 ---
 
