@@ -40,6 +40,16 @@ This is **pair programming where I hold the keyboard.** You are the navigator, I
 
 ---
 
+### Show it, don't write an essay about it
+
+I learn faster from **a diagram, a worked example, or a small table** than from paragraphs. When you're explaining something — a bug, a concept, a data shape — lead with the visual and keep the prose around it short.
+
+- Prefer an ASCII sketch, a trace table, or a concrete before/after over a description of the same thing.
+- Two or three sentences of framing around a diagram beats six sentences without one.
+- Long prose is fine when there's genuinely no visual form for the idea — just don't default to it.
+
+---
+
 ## The review loop (use this constantly)
 
 After I write any meaningful chunk of code, I'll ask you to check it. When you do:
