@@ -84,10 +84,10 @@ def daterange_chunks(start: dt.date, end: dt.date, chunk_days: int):
     """Yield (chunk_start, chunk_end) inclusive windows, each ≤ chunk_days wide.
     Last window clamps to `end`."""
     cur = start
-    while cur <= end:
+    while cur + timedelta(days=MAX_PREVIOUS_DAY) <= end:
         hi = min(cur + timedelta(days=(chunk_days - 1)) , end)
         yield (cur, hi)
-        cur = hi + timedelta(days=1)
+        cur = hi + timedelta(days=1) - timedelta(days=MAX_PREVIOUS_DAY)
 
 
 def main() -> None:
@@ -100,8 +100,18 @@ def main() -> None:
         long_df = reshape_to_long(prev_model_hourly_data_df)
         print(long_df.value_counts('issue_ts'))
         validate(long_df)
+
+        # An issue_date can only be written complete if its full target span
+        # (D .. D+7) sits inside this chunk. Writing the others would land a
+        # truncated file under a key the next chunk also owns -- last write wins,
+        # and the partial one silently survives.
+        # Cost: the final 7 issue dates of the backfill are never written, since
+        # their targets run past backfill_end. Deliberate.
+        write_from = pd.Timestamp(low, tz='UTC')
+        write_to = pd.Timestamp(high, tz='UTC') - timedelta(days=MAX_PREVIOUS_DAY)
+        long_df_corrected = long_df[(long_df['issue_ts'] >= write_from) & (long_df['issue_ts'] <= write_to)]
         
-        for name, group in long_df.groupby('issue_ts'):
+        for name, group in long_df_corrected.groupby('issue_ts'):
             key = bronze_key(name)
             body = '{"data":' + group.to_json(orient='records', date_format='iso') + '}'
             write_bronze(key, body)
