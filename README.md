@@ -13,7 +13,7 @@ Foresight forecasts GB electricity demand **1–7 days ahead** — at the horizo
 
 The project is built to demonstrate **data-engineering judgement**, not just model accuracy. The interesting parts are the point-in-time-correct feature store (no peeking at the future) and the deliberate, defensible AWS service choices — including the services I *didn't* use.
 
-Current results: the model beats a seasonal-naive baseline by **23–44%** at every horizon under walk-forward validation. See [Results](#results).
+Current results: the model beats a seasonal-naive baseline by **23–45%** at every horizon under walk-forward validation. See [Results](#results).
 
 ---
 
@@ -131,14 +131,16 @@ Error is RMSE as a percentage of mean demand. Both rows are scored on identical 
 
 | Lead (days) | Baseline | LightGBM | Improvement |
 |---|---|---|---|
-| 0 | 11.39% | **6.41%** | −44% |
-| 1 | 11.30% | **8.04%** | −29% |
-| 2 | 11.23% | **8.15%** | −27% |
-| 3 | 11.13% | **8.20%** | −26% |
-| 4 | 11.07% | **8.48%** | −23% |
-| 5 | 11.04% | **8.47%** | −23% |
-| 6 | 11.00% | **8.45%** | −23% |
-| 7 | 12.33% | **8.96%** | −27% |
+| 0 | 10.96% | **6.06%** | −45% |
+| 1 | 10.96% | **7.80%** | −29% |
+| 2 | 10.96% | **7.88%** | −28% |
+| 3 | 10.96% | **7.98%** | −27% |
+| 4 | 10.96% | **8.24%** | −25% |
+| 5 | 10.96% | **8.37%** | −24% |
+| 6 | 10.96% | **8.43%** | −23% |
+| 7 | 12.33% | **8.97%** | −27% |
+
+The baseline is identical across leads 0–6 because `lag_7d` for a given target hour does not depend on how far ahead you are standing; lead 7 differs only because the publication gate forces the fallback to `lag_14d`. Model error, by contrast, degrades monotonically with the horizon — which is the behaviour you want to see, and a useful check that nothing is leaking.
 
 The model is given the baseline's own anchors as features, so the baseline is a degenerate case of the model rather than a competitor with different information. Beating it means the remaining features carry *signal* beyond the anchor.
 
@@ -148,11 +150,17 @@ Removing the three weather features (`temperature_2m` and the HDD/CDD hinges) an
 
 | Lead (days) | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
 |---|---|---|---|---|---|---|---|
-| Error added by removing weather (pp) | +0.11 | +0.48 | +0.63 | +0.59 | +0.78 | +0.90 | +0.89 |
+| Error added by removing weather (pp) | +0.16 | +0.55 | +0.68 | +0.72 | +0.86 | +0.91 | +0.89 |
 
-Weather barely moves the average error — what it does is **flatten the degradation curve across the horizon**. Error growth from lead 1 to lead 6 is +0.41pp with weather and +1.20pp without. At short leads a recent demand reading carries almost everything; by day 6 it is stale and the issued forecast is the only genuinely forward-looking input left. That is the entire justification for the point-in-time weather pipeline.
+Weather barely moves the average error — what it does is **flatten the degradation curve across the horizon**. Error growth from lead 1 to lead 6 is +0.63pp with weather and +1.39pp without. At short leads a recent demand reading carries almost everything; by day 6 it is stale and the issued forecast is the only genuinely forward-looking input left. That is the entire justification for the point-in-time weather pipeline.
 
-At lead 0 the weather features make the model *worse* (5.90% → 6.41%): with a 2-hour-old demand reading available they add little beyond noise. One pooled model across all leads cannot spend its capacity differently per horizon, so the splits it needs at lead 7 cost it something at lead 0 — a measured trade-off of pooling rather than an assumed one.
+At lead 0 the weather features make the model *worse* (5.45% → 6.06%): with a 2-hour-old demand reading available they add little beyond noise. One pooled model across all leads cannot spend its capacity differently per horizon, so the splits it needs at lead 7 cost it something at lead 0 — a measured trade-off of pooling rather than an assumed one.
+
+### A data-quality bug worth recording
+
+An early version of these numbers was computed on a mart where lead 0 had 29% fewer rows than lead 7. The cause was in ingestion, not modelling: the backfill fetched Open-Meteo Previous Runs in chunks of **target** dates, but landed Bronze partitioned by **issue** date — and a single issue date's records span the following 8 target days. Any issue date near a chunk boundary was therefore split across two fetches, each writing its own half to the same key, last write winning. The result was a recurring multi-day hole affecting short leads hardest, with no error raised anywhere: the deterministic-key overwrite that makes re-runs idempotent quietly assumes one key's data comes from one fetch.
+
+The fix constrains each chunk to write only the issue dates it can complete (`lo … hi − 7`) and advances the window so those *writable* ranges tile contiguously. Row counts per lead are now flat to within the expected one-day-per-lead boundary effect, and every landed partition carries all eight lead offsets.
 
 <!-- TODO: add the accuracy-over-time chart and an error-analysis note (where does it struggle — bank holidays? cold snaps?) -->
 
