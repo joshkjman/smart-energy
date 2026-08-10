@@ -51,23 +51,31 @@ def load_features(con) -> pd.DataFrame:
     return df
 
 
+PARAMS = {
+    'objective':"regression",   # L2 loss -- directly minimises what RMSE measures
+    'n_estimators':500,         # number of trees
+    'learning_rate':0.05,       # how much each tree contributes; lower = more trees needed
+    'num_leaves':31,            # tree complexity. LightGBM grows leaf-wise, not depth-wise
+    'min_child_samples':20,     # min rows in a leaf; guards against overfitting noise
+    'random_state':42,          # inert here -- see note below
+    'n_jobs':-1,
+    'verbose':-1,               # otherwise it prints a wall of text per fold
+}
+# Deliberately untuned. subsample/colsample_bytree are left at their defaults
+# of 1.0, so there is no bagging and the fit is fully deterministic -- the seed
+# changes nothing. Turning bagging on (subsample=0.8, subsample_freq=1,
+# colsample_bytree=0.8) was measured as ~0.05pp better at every lead, but
+# taking it would mean picking a hyperparameter by reading the fold scores,
+# which is what stops those scores being an honest estimate of generalisation.
+# Not worth 0.05pp.
+
+
 def run_fold(train_df, test_df) -> pd.DataFrame:
     """Fit on train_df, predict test_df.
 
     Returns test_df's identifying columns plus a prediction column, so the
     caller can concatenate folds and score once at the end.
     """
-    PARAMS = {
-        'objective':"regression",   # L2 loss -- directly minimises what RMSE measures
-        'n_estimators':500,         # number of trees
-        'learning_rate':0.05,       # how much each tree contributes; lower = more trees needed
-        'num_leaves':31,            # tree complexity. LightGBM grows leaf-wise, not depth-wise
-        'min_child_samples':20,     # min rows in a leaf; guards against overfitting noise
-        'random_state':42,          # without this, two runs give different numbers
-        'n_jobs':-1,
-        'verbose':-1,               # otherwise it prints a wall of text per fold
-    }
-
     model = lgb.LGBMRegressor(**PARAMS)
     model.fit(train_df[FEATURES], train_df[TARGET])
     test_df['demand_prediction'] = model.predict(test_df[FEATURES])

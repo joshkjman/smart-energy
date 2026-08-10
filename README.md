@@ -156,6 +156,14 @@ Weather barely moves the average error — what it does is **flatten the degrada
 
 At lead 0 the weather features make the model *worse* (5.45% → 6.06%): with a 2-hour-old demand reading available they add little beyond noise. One pooled model across all leads cannot spend its capacity differently per horizon, so the splits it needs at lead 7 cost it something at lead 0 — a measured trade-off of pooling rather than an assumed one.
 
+### Is any of this noise?
+
+The model is fitted with LightGBM's bagging and column sampling left off, which makes the fit fully deterministic — so `random_state` is inert and repeated runs are byte-identical. That is good for reproducibility but proves nothing about stability, so the seed sweep was re-run with bagging *enabled* to get a genuine noise floor: run-to-run standard deviation is **0.01–0.04pp**, with a total spread across five seeds of at most 0.09pp.
+
+Against that floor, the weather effects are real. The lead-0 penalty lands between −0.50 and −0.61pp across every seed — same sign each time, roughly five times the spread — and the lead-6 gain never drops below +0.88pp.
+
+Hyperparameters are deliberately untuned. Enabling bagging measured ~0.05pp better at every lead, but adopting it would mean selecting a hyperparameter by reading the walk-forward scores, at which point those scores stop being an unbiased estimate of generalisation. The 0.05pp is not worth that.
+
 ### A data-quality bug worth recording
 
 An early version of these numbers was computed on a mart where lead 0 had 29% fewer rows than lead 7. The cause was in ingestion, not modelling: the backfill fetched Open-Meteo Previous Runs in chunks of **target** dates, but landed Bronze partitioned by **issue** date — and a single issue date's records span the following 8 target days. Any issue date near a chunk boundary was therefore split across two fetches, each writing its own half to the same key, last write winning. The result was a recurring multi-day hole affecting short leads hardest, with no error raised anywhere: the deterministic-key overwrite that makes re-runs idempotent quietly assumes one key's data comes from one fetch.
