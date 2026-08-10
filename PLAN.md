@@ -100,10 +100,12 @@ The phases below are numbered in a logical dependency order, but we are **not** 
 
 *Goal: query the raw data with SQL, serverlessly. Spec: Phase 3.*
 
-- [ ] Set up the Glue Crawler + Catalog in Terraform.
-- [ ] Configure partition projection on the date-partitioned prefixes.
-- [ ] Set the Athena query-result location with a lifecycle rule.
-- [ ] Explore the data in Athena; sanity-check it. *I write the queries.*
+- [x] Provision the S3 data lake bucket in Terraform and upload the local backfill. *(`smart-energy-lake` — private, SSE-S3, versioned, per-prefix lifecycle retention. 1490 objects / 28.5MB synced to `bronze/`, key layout preserved from local so DuckDB and Athena provably read the same bytes.)*
+- [x] **Decide: Glue Crawler vs. partition projection. → partition projection, no crawler.** A crawler's job is *discovering* a schema you don't already know; I wrote both writers, so there's nothing to discover — the schema is fixed and the partitions are strictly generable Hive-style `date=YYYY-MM-DD` / `issue_date=YYYY-MM-DD`, one per day. Projection is free and resolves at query time; a crawler is $0.44/DPU-hour with a 1-minute minimum per run, and new partitions only appear after the next crawl. **What I'm giving up:** the crawler would have caught schema drift — with projection, an upstream field rename silently becomes nulls in a hand-declared column. I own that risk now, which is an argument for hardening the ingestion `validate()` tripwires. **When I'd use a crawler instead:** data whose producer I don't control, or irregular partition values that can't be generated from a pattern.
+- [ ] Define the Glue Catalog database + tables in Terraform (`aws_glue_catalog_database`, `aws_glue_catalog_table`) — schema declared explicitly, no crawler.
+- [ ] Configure partition projection on the date-partitioned prefixes (`projection.enabled`, `projection.<col>.type = date`, `storage.location.template`).
+- [ ] Set the Athena query-result location with a lifecycle rule. *Note: results are never overwritten, just piled up — so that prefix wants a plain `expiration` rule, not `noncurrent_version_expiration` like the data prefixes.*
+- [ ] Explore the data in Athena; sanity-check it against the DuckDB mart. *I write the queries.*
 - [ ] **Explain-back:** why Athena over Redshift for this data size?
 
 ---
@@ -205,6 +207,7 @@ The phases below are numbered in a logical dependency order, but we are **not** 
 - **Hyperparameters deliberately untuned.** Enabling bagging measured ~0.05pp better at every lead, but adopting it means choosing a hyperparameter by reading the walk-forward scores — at which point those scores stop being an unbiased estimate of generalisation. Recorded in `ml/train.py` and the README rather than taken. *"I set a seed" and "I checked it's stable" are different claims; only the second is evidence.*
 - **Feature candidates considered and parked** (not obviously worth the leakage risk yet): `lag_1d`, rolling means (need the point-in-time care the row-wise hinges didn't), cyclical hour encoding, holiday adjacency. Also: derive `base_temperature` empirically from the demand-vs-temperature minimum rather than taking the 15.5°C UK convention.
 - **Known reproducibility gap (accepted, not fixed):** 14 Bronze partitions (`2024-06-24…30`, `2026-07-05…11`) survive from the pre-fix run and the corrected code deliberately never writes them. Their contents are correct, but a backfill into an empty `data/` wouldn't reproduce them. Fix when convenient by widening `backfill_start`/`backfill_end` by 7 days each so the wanted window sits inside the writable range.
+- **Bronze stays raw JSON; Parquet belongs at silver.** The bronze files carry a `{"data": [...]}` envelope, so both staging models `unnest(data)` — that ports straight to `dbt-athena`, so nothing gets rewritten. The real cost is the **small-files problem**: 1490 objects averaging ~19KB is what Athena is worst at, since per-object overhead dominates the scan. Fix it by materialising *silver* as Parquet, not by reformatting the raw landing zone.
 - **Track B starting position (2026-08-10):** AWS account has an IAM user (`joshuaman`, acct `971422716045`), billing alarms/budget set, `eu-west-2`. Terraform backend configured in `infra/backend.tf` against `s3://smart-energy-tfstate` (encrypted, `use_lockfile = true`) — but **`terraform state list` is empty: Terraform manages nothing yet.** The state bucket is the only bucket in the account.
 - 
 
