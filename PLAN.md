@@ -49,6 +49,8 @@ The phases below are numbered in a logical dependency order, but we are **not** 
 
 **Rule:** don't sink sessions into Track B (Glue crawlers, Step Functions, IAM) until Track A produces a model that beats baseline. An unfinished analytical core showcases nothing; a local-but-complete one showcases everything. Map to phases: Track A ≈ finish 2 (backfill only) → 4 → 5. Track B ≈ rest of 2 → 3 → 6 → 7. Then 8/9.
 
+> **✅ Gate cleared (2026-08-10).** Track A is done: 24-month backfill, leakage-safe mart, seasonal-naive baseline, walk-forward validation, and a LightGBM model beating baseline 23–45% at every horizon — with the effect sizes checked against a measured noise floor. **We are now on Track B.** Remaining Track A items (error analysis, the two explain-backs, dbt docs) are polish and can be picked up alongside.
+
 ---
 
 ## Phase 0 — Foundations & Cost Guardrails
@@ -84,13 +86,13 @@ The phases below are numbered in a logical dependency order, but we are **not** 
 
 - [x] Decide the ingestion pattern: one Lambda per source, EventBridge schedules. **Lambda over Glue** — tiny non-streaming JSON pulls, seconds of Python, no distributed compute; Lambda's sub-second start + per-ms billing beats Spark's minutes-long cluster spin-up + DPU-hour floor. (Glue only right for GB+ distributed transforms.) **One Lambda per source** — independent schedules, failure isolation, and least-privilege IAM (each role scoped to its one API + one S3 prefix).
 - [x] Write the demand ingestion client (Python — I've got this; you review edge cases). *(Elexon `initialDemandOutturn`; range-capable via `fetch_demand_outturn(from, to)`, 28-day API cap handled by chunking; writes one file per settlement date.)*
-- [~] Write the weather **Previous Runs** ingestion (predictors), stamped by lead offset. *(Client + `reshape_to_long` written; write-loop + `validate()` still commented out, and it's not yet range-capable (`past_days` relative to today). Deferred until backfill.)*
+- [x] Write the weather **Previous Runs** ingestion (predictors), stamped by lead offset. *(Client + `reshape_to_long` + `validate()` + per-`issue_date` write loop all live. Range-capable via `daterange_chunks(start, end, chunk_days)` — absolute dates, no `past_days`.)*
 - [ ] Write the weather **actuals** ingestion (targets).
 - [ ] Write carbon intensity + Agile price ingestion.
-- [ ] Add Pydantic validation / data contracts to each. *Ask me what should happen when validation fails.*
-- [~] Backfill historical data to bootstrap training (Previous Runs archive). *(Only a 32-day demand sliver (2026-06-10 → 07-11) pulled locally to unblock the Gold join. Full 12–24 month weather + demand backfill still to do — the real blocker before baseline/validation.)*
+- [~] Add Pydantic validation / data contracts to each. *(Hand-rolled `validate()` tripwires exist — non-empty + required columns — but no Pydantic/contract layer. Note: the 2026-08 ingestion bug proved these tripwires are too weak; a truncated group passes every check.)*
+- [x] Backfill historical data to bootstrap training (Previous Runs archive). *(Weather + demand backfilled 2024-07-01 → 2026-07-11 — 24 months, two full annual cycles. Weather re-run after the chunk/partition fix below; 734 issue_date partitions, all carrying leads 0–7.)*
 - [ ] Write the Lambda + EventBridge + IAM in Terraform. *I write the HCL; you correct syntax. Security pass on the IAM roles — make me justify each permission.*
-- [ ] **Explain-back:** why is each ingestion write idempotent, and how?
+- [x] **Explain-back:** why is each ingestion write idempotent, and how? *(Deterministic key: same input date → same S3 key → re-runs overwrite. **Caveat learned the hard way:** that only holds when one key's data comes from one fetch. Weather chunks on target date but keys on issue date, so two fetches owned the same key and last-write-wins silently truncated it — see Running notes.)*
 
 ---
 
@@ -116,7 +118,7 @@ The phases below are numbered in a logical dependency order, but we are **not** 
 - [x] Build Silver staging models (clean, typed, half-hourly-aligned, deduplicated). *3 models: `stg_demand`, `stg_weather_forecast` (pivoted long→wide), `stg_bank_holidays` (E&W + Scotland unioned). Tests: not-null/unique on keys, temp validity bounds, holiday grain.*
 - [x] Build the Gold feature store. **This is the hard part.** *`fct_demand_features`, grain `(target_ts, lead_days)`. Weather rides the grain (`issue_ts = target − lead`) for free point-in-time correctness; label joined at target (demand aggregated half-hourly→hourly).*
 - [x] Engineer lag features and rolling stats that never peek into the future. *`demand_lag_mw` via ASOF join at `cutoff = target − lead − publication_lag`. (Rolling stats not yet added — single lag for now.)*
-- [~] Add dbt tests, including no-future-leakage assertions. *Compound-grain uniqueness + not-nulls on keys/label done. The leakage guard is currently proven **structurally** (grain enforces it) rather than by an explicit assertion test — worth adding one.*
+- [~] Add dbt tests, including no-future-leakage assertions. *19 tests passing: compound-grain uniqueness, not-nulls on keys/label, temperature validity bounds, and `assert_heat_cool_signage` (singular test — HDD/CDD hinges can't both fire on the same side of `base_temperature`). That last one was **verified to have teeth**: swapping the hinge arms in the mart made it `FAIL 141543` while the other 8 stayed green, then reverted. The leakage guard itself is still proven **structurally** (the grain enforces it), not by an explicit assertion — still worth adding one.*
 - [ ] Generate dbt docs; screenshot the lineage graph.
 - [x] **Explain-back:** pick any feature and make me prove it can't leak. *(Done — weather-vs-demand asymmetry: forecast legal-at-target vs actual forbidden-at-target; demand's sliding cutoff + ASOF.)*
 
@@ -126,11 +128,13 @@ The phases below are numbered in a logical dependency order, but we are **not** 
 
 *Goal: a model that beats baseline, validated correctly. Spec: Phase 5. This is the core ML learning — least help here.*
 
-- [ ] Build the seasonal-naive baseline FIRST. *Don't let me skip this. Make me predict roughly how hard it'll be to beat.*
-- [ ] Measure baseline MAE/MAPE.
-- [ ] Implement walk-forward (expanding-window) validation. *If I reach for `train_test_split`, stop me and ask why it's wrong.*
-- [ ] Build the LightGBM forecaster on the point-in-time features. *I write the modelling code; you review for leakage and correctness.*
-- [ ] Compare to baseline by horizon.
+- [x] Build the seasonal-naive baseline FIRST. *(`ml/score_baseline.py` — same hour on the most recent **legal** same-weekday anchor: `lag_7d`, falling back to `lag_14d` at lead 7 where the publication gate makes a 7-day anchor unknowable.)*
+- [x] Measure baseline MAE/MAPE. *(Settled on **RMSE as % of mean demand** — RMSE because large misses are what cost a grid operator, normalised so the number is comparable across leads. Baseline: 10.96% at leads 0–6, 12.33% at lead 7.)*
+- [x] Implement walk-forward (expanding-window) validation. *(`ml/folds.py` — 12 monthly folds over Jul 2025 – Jun 2026, with a **7-day purge** between each fold's train cutoff and its test window, because a model fitted at `train_end` predicts up to 7 days past it.)*
+- [x] Build the LightGBM forecaster on the point-in-time features. *(`ml/train.py` — one pooled model across all leads, `lead_days` as a feature. Deliberately untuned; see Running notes.)*
+- [x] Compare to baseline by horizon. *(Beats baseline **23–45%** at every lead, scored on identical rows. Model error degrades monotonically with lead — the sanity check that nothing leaks. Full table in README.)*
+- [x] Weather ablation: quantify what the point-in-time forecast pipeline actually buys. *(Removing the 3 weather features costs +0.16pp at lead 1 rising to +0.91pp at lead 6 — weather **flattens the degradation curve** rather than lowering the average. At lead 0 it makes the model slightly *worse*: a measured cost of pooling one model across all horizons.)*
+- [x] Establish a noise floor before believing any of it. *(Seed sweep initially returned byte-identical scores — LightGBM is deterministic with bagging off. Re-ran with bagging enabled to manufacture variance: std 0.01–0.04pp, max spread 0.09pp. The weather effects are ~5–10× that, so they're real.)*
 - [ ] Error analysis: where does it struggle (holidays, cold snaps, longer horizons)?
 - [ ] **Explain-back:** why is random k-fold wrong here, and what does walk-forward simulate?
 
@@ -196,7 +200,12 @@ The phases below are numbered in a logical dependency order, but we are **not** 
 - **Ownership rule resolved (DESIGN §5):** live vs backfill weather writes collide at the file level (identical `issue_date` path, last-writer-wins). Defence = disjoint ranges by construction + per-client write-once guard (weather fail-closed; demand permissive since outturn gets revised) + delete-to-correct as the deliberate escape hatch. The grain uniqueness test is **not** the backstop (collision resolves before dbt reads).
 - **`is_holiday` is all-`false` in the current window** — no E&W bank holiday falls in 10 Jun–11 Jul 2026. Expected, not a bug; the column exercises once the data window spans a real holiday. Division decision: filtered to `eng&wales` (dominates GB demand).
 - **Local dev tip:** DuckDB is a single file (`dbt/foresight.duckdb`); can browse in DBeaver (read-only driver prop to coexist with `dbt run`), or `dbt compile` + open `target/compiled/.../fct_demand_features.sql` to step through CTEs.
-- **Next-session fork:** either (a) do the deferred weather+demand **backfill** (unblocks everything downstream — 12–24 months), or (b) keep building **baseline + walk-forward** logic against the small local set and backfill later. Baseline/validation only become *meaningful* with ≥12 months (annual cycle), so the backfill is the more honest next step.
+- ~~**Next-session fork:** backfill vs. build baseline first.~~ **Resolved:** did the backfill first (24 months), then baseline + walk-forward on top. Correct call — validation is meaningless without a full annual cycle.
+- **Ingestion bug found 2026-08-10 — the chunk key and the partition key must agree.** The weather backfill fetched in chunks of **target** date but landed Bronze partitioned by **issue** date, and one issue date's records span the next 8 target days. Every issue date within 7 days of a chunk boundary was therefore split across two fetches, each writing its own half to the same key — last write wins, silently. Result: a recurring ~6-day hole every 30 days, hitting **short leads hardest** (lead 0 had 29% fewer rows than lead 7), and *nothing errored*, because `validate()` only checks non-empty + column presence and a truncated group passes both. **Fix:** a chunk covering targets `[lo, hi]` may only write issue dates `[lo, hi−7]`, and the loop advances so those *writable* ranges tile contiguously (`cur = hi + 1 − 7`). **Second bug the fix introduced:** subtracting 7 destroyed the forward-progress guarantee, so once `hi` clamped to `end` the loop never terminated — masked by an API rate-limit error that looked like the real problem. Loop condition is now `while cur + 7 <= end`. *Lessons worth being able to say out loud: deterministic-key idempotency assumes one key's data comes from one fetch; a validation that can't fail on truncation isn't validating; and skip-if-exists would have been the wrong fix — it only rescues this by luck of write ordering and blocks corrective re-runs.*
+- **Hyperparameters deliberately untuned.** Enabling bagging measured ~0.05pp better at every lead, but adopting it means choosing a hyperparameter by reading the walk-forward scores — at which point those scores stop being an unbiased estimate of generalisation. Recorded in `ml/train.py` and the README rather than taken. *"I set a seed" and "I checked it's stable" are different claims; only the second is evidence.*
+- **Feature candidates considered and parked** (not obviously worth the leakage risk yet): `lag_1d`, rolling means (need the point-in-time care the row-wise hinges didn't), cyclical hour encoding, holiday adjacency. Also: derive `base_temperature` empirically from the demand-vs-temperature minimum rather than taking the 15.5°C UK convention.
+- **Known reproducibility gap (accepted, not fixed):** 14 Bronze partitions (`2024-06-24…30`, `2026-07-05…11`) survive from the pre-fix run and the corrected code deliberately never writes them. Their contents are correct, but a backfill into an empty `data/` wouldn't reproduce them. Fix when convenient by widening `backfill_start`/`backfill_end` by 7 days each so the wanted window sits inside the writable range.
+- **Track B starting position (2026-08-10):** AWS account has an IAM user (`joshuaman`, acct `971422716045`), billing alarms/budget set, `eu-west-2`. Terraform backend configured in `infra/backend.tf` against `s3://smart-energy-tfstate` (encrypted, `use_lockfile = true`) — but **`terraform state list` is empty: Terraform manages nothing yet.** The state bucket is the only bucket in the account.
 - 
 
 ---
