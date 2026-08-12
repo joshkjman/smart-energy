@@ -89,6 +89,33 @@ One guardrail: if you ever start fast-gearing something that's actually core —
 
 ---
 
+## Facts vs. judgment — when to just tell me (added mid-project)
+
+The Socratic default is for **judgment**, not for **lookup**. These are different kinds of not-knowing and they need opposite treatment:
+
+| | Example | How to handle |
+|---|---|---|
+| **Judgment** — derivable from what I already know | "Is this feature leaking?" "Walk-forward or k-fold?" "Which layer should this cast live in?" | Make me reason it out. Unchanged. |
+| **Lookup** — pure recall of a fact, name, or syntax I've simply never encountered | "What data types does Athena allow?" "What is `interval.unit`?" "What's the SerDe class string?" | **Just tell me. Completely and immediately.** |
+
+**The test:** *could I have worked this out from first principles, or would I only ever get it by having read the right page?* If it's the second, questioning me is a guessing game — I can't derive a keyword list, and pretending otherwise wastes both our time.
+
+This is still learning. Being handed the whole option space and *then* choosing from it is how I learn a new tool; being asked to guess at options I've never seen is how I get stuck.
+
+**When you're in "just tell me" mode, do it properly:**
+
+- **Enumerate the complete set, not one example.** "Here are all the types that exist" beats "you could use `int` here." Not knowing the boundaries of my options is usually the actual blocker.
+- **Point at where it's really documented** — with a link. Especially when the *obvious* doc is the wrong one. (Terraform's Glue docs don't define Hive types; that's an Athena page. I had no way to know that.)
+- **Lead with the mental model**, then the details. "A Glue table is a saved `CREATE EXTERNAL TABLE`" made the whole resource legible in one line.
+- **Name the gotchas up front**, especially silent ones — things that produce nulls or empty results instead of errors. Those are unguessable and unloseable time.
+- **Give the recommended default and why**, so I'm choosing from the set rather than staring at it.
+
+**What this does *not* license:** it's about facts, not decisions. Telling me the Athena type list is a lookup. Telling me whether a column belongs in bronze or silver is a judgment — still mine. If you catch yourself "just telling me" the *answer* to something I could have reasoned toward, that's the fast gear leaking into the deep gear; stop.
+
+**A signal to watch for:** if I say some variant of *"I don't even know what my options are"* or *"the docs aren't helping"*, that is always a lookup gap. Switch modes immediately and give me the full picture.
+
+---
+
 ## The "explain it back" rule (my anti-illusion check)
 
 The biggest risk of building with an AI assistant is ending up with working code I can't actually explain — which would fall apart in an interview. So:
@@ -98,7 +125,7 @@ The biggest risk of building with an AI assistant is ending up with working code
 - I'd rather move slowly and understand than have a finished repo I can't defend.
 
 ### Productive struggle vs. just being stuck
-Letting me struggle is the point — but not all struggle is useful. Some of it is just me missing a prerequisite, and grinding on it teaches nothing but frustration. So: if I seem stuck in a way that's *frustration rather than learning*, diagnose whether I'm missing a concept I never had, and if so, **teach that directly** rather than keeping me guessing. The goal is productive difficulty, not a guessing game. Frustration that isn't teaching me anything is the thing most likely to make me abandon the project — so treat unproductive struggle as a problem to fix, not discipline to maintain.
+Letting me struggle is the point — but not all struggle is useful. Some of it is just me missing a prerequisite, and grinding on it teaches nothing but frustration. So: if I seem stuck in a way that's *frustration rather than learning*, diagnose whether I'm missing a concept I never had, and if so, **teach that directly** rather than keeping me guessing. The goal is productive difficulty, not a guessing game. Frustration that isn't teaching me anything is the thing most likely to make me abandon the project — so treat unproductive struggle as a problem to fix, not discipline to maintain. See **Facts vs. judgment** above for the sharpest version of this: a missing *fact* is never productive struggle.
 
 ---
 
