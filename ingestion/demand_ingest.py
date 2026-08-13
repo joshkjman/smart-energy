@@ -48,7 +48,7 @@ def bronze_key(settlement_date: dt.date) -> str:
 
     Same date in -> same key out, so re-runs overwrite (idempotency).
     """
-    return f"{BRONZE_PREFIX}/date={settlement_date:%Y-%m-%d}/demand.json"
+    return f"{BRONZE_PREFIX}/settlement_date={settlement_date:%Y-%m-%d}/demand.json"
 
 
 def daterange_chunks(start: dt.date, end: dt.date, chunk_days: int):
