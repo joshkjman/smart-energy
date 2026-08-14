@@ -8,18 +8,11 @@ with weather_wide as (
     on variable
     using first(value)
 ),
-demand_hourly as (
-    select
-        date_trunc('hour', start_time) as target_hour,
-        avg(initial_demand_outturn) as initial_demand_outturn
-    from {{ ref('stg_demand') }}
-    group by target_hour
-),
 labelled as (
     select w.*,
-            d.initial_demand_outturn as demand_mw
+            d.avg_initial_demand_outturn as demand_mw
     from weather_wide w
-    left join demand_hourly d on w.target_ts = d.target_hour
+    left join {{ ref('int_demand_hourly' )}} d on w.target_ts = d.target_hour
 ),
 cutoff_data as (
     select *,
@@ -28,39 +21,44 @@ cutoff_data as (
 ),
 lagged as (
     select c.*,
-        d.initial_demand_outturn as demand_lag_mw
+        d.avg_initial_demand_outturn as demand_lag_mw
     from cutoff_data c
-    asof left join demand_hourly d
-    on d.target_hour <= c.cutoff
+    left join {{ ref('int_demand_hourly' )}} d
+    on d.target_hour = date_trunc('hour', c.cutoff)
 ),
 seasonal_naive as (
     select
         l.*,
         case
-            when (l.target_ts - interval '168 hours') <= cutoff then d7.initial_demand_outturn
+            when (l.target_ts - interval '168 hours') <= cutoff then d7.avg_initial_demand_outturn
             else null
         end as lag_7d,
         case
-            when (l.target_ts - interval '336 hours') <= cutoff then d14.initial_demand_outturn
+            when (l.target_ts - interval '336 hours') <= cutoff then d14.avg_initial_demand_outturn
             else null
         end as lag_14d
     from lagged l
-    left join demand_hourly d7
+    left join {{ ref('int_demand_hourly' )}} d7
       on d7.target_hour = (l.target_ts - interval '168 hours')
-    left join demand_hourly d14
+    left join {{ ref('int_demand_hourly' )}} d14
       on d14.target_hour = (l.target_ts - interval '336 hours')
+),
+local_ts as (
+    select  *,
+            target_ts at time zone 'UTC' at time zone 'Europe/London' as target_ts_local
+    from seasonal_naive
 ),
 calendar as (
     select *
-    from seasonal_naive s
+    from local_ts l
     left join {{ ref('stg_bank_holidays') }} b
-    on s.target_ts::date = b.holiday_date
+    on l.target_ts_local::date = b.holiday_date
     and division = 'eng&wales'
 )
 select
     target_ts,
-    extract('hour' from target_ts) as hour,
-    extract('dow' from target_ts) as day,
+    extract('hour' from target_ts_local)  as hour,
+    extract('dow' from target_ts_local)  as day,
     lead_days,
     demand_mw,
     demand_lag_mw,

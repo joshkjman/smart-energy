@@ -1,0 +1,14 @@
+version: 2
+models:
+  - name: int_demand_hourly
+    description: Demand values grouped hourly as an average of the two half hour values that fall in the target hour. Converting it to an hour to match weather forecasts' time hour granularity.
+    columns:
+      - name: target_hour
+        description: targetted hour of demand
+        data_tests:
+          - not_null
+          - unique
+          - dbt_utils.sequential_values:
+              arguments:
+                interval: 1
+                datepart: hour

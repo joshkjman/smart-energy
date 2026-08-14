@@ -3,8 +3,8 @@ with raw as (
     from {{ source('bronze', 'demand') }}
 )
 select
-    r.publishTime at time zone 'UTC' as publish_time,
-    r.startTime at time zone 'UTC' as start_time,
+    r.publishTime as publish_time,
+    r.startTime as start_time,
     r.settlementDate as settlement_date,
     r.settlementPeriod as settlement_period,
     r.initialDemandOutturn as initial_demand_outturn,
