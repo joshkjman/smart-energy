@@ -3,15 +3,10 @@
 -- Invariant: every predictor must be knowable as of prediction_time = target_ts - lead.
 
 
-with weather_wide as (
-    pivot {{ ref('stg_weather_forecast') }}
-    on variable
-    using first(value)
-),
-labelled as (
+with labelled as (
     select w.*,
             d.avg_initial_demand_outturn as demand_mw
-    from weather_wide w
+    from {{ ref('stg_weather_forecast') }} w
     left join {{ ref('int_demand_hourly' )}} d on w.target_ts = d.target_hour
 ),
 cutoff_data as (

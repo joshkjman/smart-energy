@@ -6,6 +6,6 @@ select
     r.target_ts as target_ts,
     r.issue_ts as issue_ts,
     r.N as lead_days,
-    regexp_replace(r.variable, '_previous_day\d+$', '') as variable,
-    r.value as value
+    max(r.value) filter (where regexp_replace(r.variable, '_previous_day\d+$', '') = 'temperature_2m') as temperature_2m
 from raw
+group by target_ts, issue_ts, lead_days

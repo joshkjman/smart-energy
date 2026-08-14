@@ -18,10 +18,8 @@ models:
         description: Target date that the prediction was made for
       - name: issue_ts
         description: The date that prediction was made for that particular target date
-      - name: variable
-        description: The variable being measured
-      - name: value
-        description: Value of variable that is measured
+      - name: temperature_2m
+        description: Max temperature value when pivoting
   - name: stg_bank_holidays
     description: staging table for bank holiday data
     columns:

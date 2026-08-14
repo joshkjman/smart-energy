@@ -1,8 +1,7 @@
 select 
     target_ts,
     issue_ts,
-    variable,
     count(*)
 from {{ ref('stg_weather_forecast') }}
-group by target_ts, issue_ts, variable
+group by target_ts, issue_ts
 having count(*) > 1
