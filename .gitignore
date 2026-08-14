@@ -8,3 +8,4 @@ dbt/foresight.duckdb
 dbt/target/
 dbt/logs/
 dbt/.user.yml
+dbt_packages/
