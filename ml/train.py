@@ -6,18 +6,14 @@ folds and scored per lead, so the result is directly comparable to the
 seasonal-naive baseline on the same rows.
 """
 import datetime as dt
-import pathlib
-
-import duckdb
 import lightgbm as lgb
 import pandas as pd
 
 from folds import generate_folds
 from score_baseline import rmse, score_by_lead, baseline_prediction
+from athena import get_athena_connection
 
 
-
-DB_PATH = pathlib.Path(__file__).parent.parent / "dbt" / "foresight.duckdb"
 
 FEATURES = [
     'hour',
@@ -40,12 +36,12 @@ CATEGORICAL = [
 
 def load_features(con) -> pd.DataFrame:
     """Pull the whole mart -- training history as well as holdout."""
-    df = con.execute(
+    df = con.cursor().execute(
             """
             select *
             from gold.fct_demand_features 
             """
-        ).df()
+        ).as_pandas()
     df['hour'] = df['hour'].astype('category')
     df['day'] = df['day'].astype('category')
     return df
@@ -85,15 +81,13 @@ def run_fold(train_df, test_df) -> pd.DataFrame:
 
 def walk_forward(df) -> pd.DataFrame:
     """Run every fold and return all out-of-sample predictions, concatenated."""
-    timezone = df['target_ts'].dt.tz    # match timezones
-
-    train_start = pd.Timestamp(year=2024, month=7, day=1, tz=timezone)
+    train_start = pd.Timestamp(year=2024, month=7, day=1)
 
     results = []
     for fold in generate_folds():
-        train_end = pd.Timestamp(fold.train_end, tz=timezone)
-        test_start = pd.Timestamp(fold.test_start, tz=timezone)
-        test_end = pd.Timestamp(fold.test_end, tz=timezone)
+        train_end = pd.Timestamp(fold.train_end)
+        test_start = pd.Timestamp(fold.test_start)
+        test_end = pd.Timestamp(fold.test_end)
 
         train_df = df[(df['target_ts'] >= train_start) & (df['target_ts'] < train_end)]
         test_df = df[(df['target_ts'] >= test_start) & (df['target_ts'] < test_end)]
@@ -109,7 +103,7 @@ def walk_forward(df) -> pd.DataFrame:
 
 
 def main():
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = get_athena_connection()
     df = load_features(con)
     con.close()
     df['baseline_prediction'] = baseline_prediction(df)

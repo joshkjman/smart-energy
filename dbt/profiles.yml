@@ -1,10 +1,6 @@
 foresight:
   target: athena
   outputs:
-    dev:
-      type: duckdb
-      path: foresight.duckdb
-      threads: 4
     athena:
       type: athena
       s3_staging_dir: s3://smart-energy-lake/athena-results/

@@ -8,26 +8,24 @@ Nothing is trained here. This is the bar the model must clear.
 """
 import pandas as pd
 import datetime as dt
-import pathlib
 import numpy as np
-import duckdb
+from athena import get_athena_connection
 
 
-HOLDOUT_START = dt.date(2025,7,1)   # TODO: the cutoff you chose — one place, reused by the model later
-DB_PATH = pathlib.Path(__file__).parent.parent / "dbt" / "foresight.duckdb"
 
+HOLDOUT_START = dt.date(2025,7,1)   # the cutoff I chose — one place, reused by the model later
 
 def load_holdout(con) -> pd.DataFrame:
     """Pull target_ts, lead_days, demand_mw, lag_7d, lag_14d from the mart
     for target_ts >= HOLDOUT_START."""
-    df = con.execute(
+    df = con.cursor().execute(
         """
         select target_ts, lead_days, demand_mw, lag_7d, lag_14d
         from gold.fct_demand_features
-        where target_ts >= ?
+        where target_ts >= %(holdout)s
         """,
-        [HOLDOUT_START],
-    ).df()
+        parameters={'holdout': HOLDOUT_START},
+    ).as_pandas()
 
     return df
 
@@ -68,7 +66,7 @@ def score_by_lead(df, score_prediction='baseline_prediction') -> pd.DataFrame:
 
 
 def main():
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = get_athena_connection()
     df = load_holdout(con)
     con.close()
 
