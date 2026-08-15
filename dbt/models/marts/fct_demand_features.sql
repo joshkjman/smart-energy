@@ -11,7 +11,7 @@ with labelled as (
 ),
 cutoff_data as (
     select *,
-        (target_ts - lead_days * interval '1 day' - interval {{ var('publication_lag_hours') }} hour) as cutoff
+        date_add('hour', -{{ var('publication_lag_hours') }}, date_add('day', -lead_days, target_ts)) as cutoff
     from labelled
 ),
 lagged as (
@@ -25,35 +25,35 @@ seasonal_naive as (
     select
         l.*,
         case
-            when (l.target_ts - interval '168 hours') <= cutoff then d7.avg_initial_demand_outturn
+            when (l.target_ts - interval '168' hour) <= cutoff then d7.avg_initial_demand_outturn
             else null
         end as lag_7d,
         case
-            when (l.target_ts - interval '336 hours') <= cutoff then d14.avg_initial_demand_outturn
+            when (l.target_ts - interval '336' hour) <= cutoff then d14.avg_initial_demand_outturn
             else null
         end as lag_14d
     from lagged l
     left join {{ ref('int_demand_hourly' )}} d7
-      on d7.target_hour = (l.target_ts - interval '168 hours')
+      on d7.target_hour = (l.target_ts - interval '168' hour)
     left join {{ ref('int_demand_hourly' )}} d14
-      on d14.target_hour = (l.target_ts - interval '336 hours')
+      on d14.target_hour = (l.target_ts - interval '336' hour)
 ),
 local_ts as (
     select  *,
-            target_ts at time zone 'UTC' at time zone 'Europe/London' as target_ts_local
+            cast(with_timezone(target_ts, 'UTC') at time zone 'Europe/London' as timestamp) as target_ts_local
     from seasonal_naive
 ),
 calendar as (
     select *
     from local_ts l
     left join {{ ref('stg_bank_holidays') }} b
-    on l.target_ts_local::date = b.holiday_date
+    on cast(l.target_ts_local as date) = b.holiday_date
     and division = 'eng&wales'
 )
 select
     target_ts,
-    extract('hour' from target_ts_local)  as hour,
-    extract('dow' from target_ts_local)  as day,
+    extract(hour from target_ts_local)  as hour,
+    day_of_week(target_ts_local)  as day,
     lead_days,
     demand_mw,
     demand_lag_mw,

@@ -1,16 +1,18 @@
 with raw as (
     select
-        unnest("england-and-wales".events) as e,
+        r,
         'eng&wales' as division
     from {{ source('bronze', 'bank_holidays') }}
+    cross join unnest(england_and_wales.events) as t(r)
     union all
     select
-        unnest("scotland".events) as e,
+        r,
         'scotland' as division
     from {{ source('bronze', 'bank_holidays') }}
+    cross join unnest(scotland.events) as t(r)
 )
 select
-    e.date::date as holiday_date,
-    e.title,
+    cast(r."date" as date) as holiday_date,
+    r.title,
     division
 from raw
