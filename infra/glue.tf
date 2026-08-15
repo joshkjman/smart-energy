@@ -116,3 +116,11 @@ resource "aws_glue_catalog_table" "bank_holidays" {
 resource "aws_glue_catalog_database" "bronze" {
   name = "bronze"
 }
+
+resource "aws_glue_catalog_database" "silver" {
+  name = "silver"
+}
+
+resource "aws_glue_catalog_database" "gold" {
+  name = "gold"
+}

@@ -5,3 +5,5 @@ dbt-duckdb==1.10.1
 numpy==2.5.1
 lightgbm==4.7.0
 scikit-learn==1.9.0
+dbt-core==1.11.12
+dbt-athena==1.11.0

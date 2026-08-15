@@ -1,8 +1,17 @@
-profiles.yml:
 foresight:
-  target: dev
+  target: athena
   outputs:
     dev:
       type: duckdb
       path: foresight.duckdb
+      threads: 4
+    athena:
+      type: athena
+      s3_staging_dir: s3://smart-energy-lake/athena-results/
+      s3_data_dir: s3://smart-energy-lake/
+      s3_data_naming: schema_table
+      region_name: eu-west-2
+      database: awsdatacatalog
+      schema: silver
+      work_group: foresight_queries
       threads: 4
