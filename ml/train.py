@@ -43,7 +43,7 @@ def load_features(con) -> pd.DataFrame:
     df = con.execute(
             """
             select *
-            from fct_demand_features 
+            from gold.fct_demand_features 
             """
         ).df()
     df['hour'] = df['hour'].astype('category')

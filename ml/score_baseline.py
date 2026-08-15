@@ -23,7 +23,7 @@ def load_holdout(con) -> pd.DataFrame:
     df = con.execute(
         """
         select target_ts, lead_days, demand_mw, lag_7d, lag_14d
-        from fct_demand_features
+        from gold.fct_demand_features
         where target_ts >= ?
         """,
         [HOLDOUT_START],
