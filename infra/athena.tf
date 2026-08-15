@@ -3,7 +3,7 @@ resource "aws_athena_workgroup" "foresight_queries" {
 
   force_destroy = true
   configuration {
-    enforce_workgroup_configuration    = true
+    enforce_workgroup_configuration    = false
     publish_cloudwatch_metrics_enabled = true
     bytes_scanned_cutoff_per_query     = 104857600
 
