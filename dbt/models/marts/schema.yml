@@ -1,7 +1,12 @@
 version: 2
 models:
   - name: fct_demand_features
-    description: One row per (target_ts, lead_days) training example; every predictor knowable as of prediction_time
+    description: >
+      One row per (target_ts, lead_days) training example; every predictor knowable as of
+      prediction_time = target_ts - lead_days. Demand predictors are held back a further
+      publication_lag_hours to cutoff, since BMRS publishes late; weather is not, since a
+      forecast run is available when issued. Enforced by assert_leakage_guard, which checks
+      each predictor against the timestamp it was read from (cutoff, issue_ts, demand_lag_ts).
     columns:
       - name: target_ts
         description: Time that you want to predict
@@ -16,7 +21,7 @@ models:
         data_tests:
           - not_null
       - name: demand_lag_mw
-        description: Demand at issue_ts (target_ts - lead_days) but also with the publication lag applied -> latest legal demand you can see
+        description: Demand at target_ts - lead_days but also with the publication lag applied -> latest legal demand you can see
         data_tests:
           - not_null
       - name: is_holiday
@@ -24,9 +29,25 @@ models:
         data_tests:
           - not_null
       - name: day
-        description: day-of-week 0–6, Sun–Sat
+        description: day-of-week 1–7, Mon–Sun
       - name: temperature_2m
-        description: Temperature measurement at that issue_ts for that target_ts
+        description: Temperature prediction for target_ts run at issue_ts
         data_tests:
           - not_null
+      - name: hour
+        description: The hour in the day in the Europe/London timezone
+      - name: lag_7d
+        description: Demand 7 days before target, used as baseline over the lead days
+      - name: lag_14d
+        description: Demand 14 days before target, used as baseline for when lag_7d can't reach lead days (lead_days=7)
+      - name: heating_degrees
+        description: Degrees below base_temperature
+      - name: cooling_degrees
+        description: Degrees above base_temperature
+      - name: cutoff
+        description: Time at demand_lag_mw, target_ts - lead_days - publication_lag
+      - name: issue_ts
+        description: When weather forecast run was issued
+      - name: demand_lag_ts
+        description: Time of demand_lag_mw, target_ts - lead_days - publication_lag, to ensure there's no leakage of cutoff 
         
