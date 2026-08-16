@@ -16,6 +16,7 @@ cutoff_data as (
 ),
 lagged as (
     select c.*,
+        d.target_hour as demand_lag_ts,
         d.avg_initial_demand_outturn as demand_lag_mw
     from cutoff_data c
     left join {{ ref('int_demand_hourly' )}} d
@@ -62,7 +63,10 @@ select
     holiday_date is not null as is_holiday,
     temperature_2m,
     greatest({{ var('base_temperature') }} - temperature_2m, 0) as heating_degrees,
-    greatest(temperature_2m - {{ var('base_temperature') }}, 0) as cooling_degrees
+    greatest(temperature_2m - {{ var('base_temperature') }}, 0) as cooling_degrees,
+    cutoff,
+    issue_ts,
+    demand_lag_ts
 from calendar
 where demand_mw is not null
 and demand_lag_mw is not null
