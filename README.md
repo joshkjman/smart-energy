@@ -13,7 +13,7 @@ Foresight forecasts GB electricity demand **1–7 days ahead** — at the horizo
 
 The project is built to demonstrate **data-engineering judgement**, not just model accuracy. The interesting parts are the point-in-time-correct feature store (no peeking at the future) and the deliberate, defensible AWS service choices — including the services I *didn't* use.
 
-Current results: the model beats a seasonal-naive baseline by **23–45%** at every horizon under walk-forward validation. See [Results](#results).
+Current results: the model beats a seasonal-naive baseline by **23–44%** at every horizon under walk-forward validation. See [Results](#results).
 
 ---
 
@@ -131,14 +131,14 @@ Error is RMSE as a percentage of mean demand. Both rows are scored on identical 
 
 | Lead (days) | Baseline | LightGBM | Improvement |
 |---|---|---|---|
-| 0 | 10.96% | **6.06%** | −45% |
-| 1 | 10.96% | **7.80%** | −29% |
-| 2 | 10.96% | **7.88%** | −28% |
-| 3 | 10.96% | **7.98%** | −27% |
-| 4 | 10.96% | **8.24%** | −25% |
-| 5 | 10.96% | **8.37%** | −24% |
-| 6 | 10.96% | **8.43%** | −23% |
-| 7 | 12.33% | **8.97%** | −27% |
+| 0 | 10.96% | **6.11%** | −44% |
+| 1 | 10.96% | **7.87%** | −28% |
+| 2 | 10.96% | **7.93%** | −28% |
+| 3 | 10.96% | **8.01%** | −27% |
+| 4 | 10.96% | **8.29%** | −24% |
+| 5 | 10.96% | **8.44%** | −23% |
+| 6 | 10.96% | **8.47%** | −23% |
+| 7 | 12.33% | **9.05%** | −27% |
 
 The baseline is identical across leads 0–6 because `lag_7d` for a given target hour does not depend on how far ahead you are standing; lead 7 differs only because the publication gate forces the fallback to `lag_14d`. Model error, by contrast, degrades monotonically with the horizon — which is the behaviour you want to see, and a useful check that nothing is leaking.
 
@@ -150,17 +150,17 @@ Removing the three weather features (`temperature_2m` and the HDD/CDD hinges) an
 
 | Lead (days) | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
 |---|---|---|---|---|---|---|---|
-| Error added by removing weather (pp) | +0.16 | +0.55 | +0.68 | +0.72 | +0.86 | +0.91 | +0.89 |
+| Error added by removing weather (pp) | +0.15 | +0.52 | +0.67 | +0.68 | +0.82 | +0.87 | +0.86 |
 
-Weather barely moves the average error — what it does is **flatten the degradation curve across the horizon**. Error growth from lead 1 to lead 6 is +0.63pp with weather and +1.39pp without. At short leads a recent demand reading carries almost everything; by day 6 it is stale and the issued forecast is the only genuinely forward-looking input left. That is the entire justification for the point-in-time weather pipeline.
+Weather barely moves the average error — what it does is **flatten the degradation curve across the horizon**. Error growth from lead 1 to lead 6 is +0.61pp with weather and +1.33pp without. At short leads a recent demand reading carries almost everything; by day 6 it is stale and the issued forecast is the only genuinely forward-looking input left. That is the entire justification for the point-in-time weather pipeline.
 
-At lead 0 the weather features make the model *worse* (5.45% → 6.06%): with a 2-hour-old demand reading available they add little beyond noise. One pooled model across all leads cannot spend its capacity differently per horizon, so the splits it needs at lead 7 cost it something at lead 0 — a measured trade-off of pooling rather than an assumed one.
+At lead 0 the weather features make the model *worse* (5.64% → 6.11%): with a 2-hour-old demand reading available they add little beyond noise. One pooled model across all leads cannot spend its capacity differently per horizon, so the splits it needs at lead 7 cost it something at lead 0 — a measured trade-off of pooling rather than an assumed one.
 
 ### Is any of this noise?
 
-The model is fitted with LightGBM's bagging and column sampling left off, which makes the fit fully deterministic — so `random_state` is inert and repeated runs are byte-identical. That is good for reproducibility but proves nothing about stability, so the seed sweep was re-run with bagging *enabled* to get a genuine noise floor: run-to-run standard deviation is **0.01–0.04pp**, with a total spread across five seeds of at most 0.09pp.
+The model is fitted with LightGBM's bagging and column sampling left off, which makes the fit fully deterministic — so `random_state` is inert and repeated runs are byte-identical. That is good for reproducibility but proves nothing about stability, so the seed sweep was re-run with bagging *enabled* to get a genuine noise floor: run-to-run standard deviation is **0.01–0.03pp**, with a total spread across five seeds of at most 0.07pp.
 
-Against that floor, the weather effects are real. The lead-0 penalty lands between −0.50 and −0.61pp across every seed — same sign each time, roughly five times the spread — and the lead-6 gain never drops below +0.88pp.
+Against that floor, the weather effects are real. The lead-0 penalty lands between −0.41 and −0.47pp across every seed — same sign each time, roughly seven times the spread — and the lead-6 gain never drops below +0.87pp.
 
 Hyperparameters are deliberately untuned. Enabling bagging measured ~0.05pp better at every lead, but adopting it would mean selecting a hyperparameter by reading the walk-forward scores, at which point those scores stop being an unbiased estimate of generalisation. The 0.05pp is not worth that.
 

@@ -27,6 +27,8 @@ FEATURES = [
     'lag_7d', 
     'lag_14d'
 ]
+WEATHER_FEATURES = ['temperature_2m', 'heating_degrees', 'cooling_degrees']
+NON_WEATHER_FEATURES = [f for f in FEATURES if f not in WEATHER_FEATURES]
 TARGET = "demand_mw"
 CATEGORICAL = [
     'hour',
@@ -57,6 +59,7 @@ PARAMS = {
     'n_jobs':-1,
     'verbose':-1,               # otherwise it prints a wall of text per fold
 }
+
 # Deliberately untuned. subsample/colsample_bytree are left at their defaults
 # of 1.0, so there is no bagging and the fit is fully deterministic -- the seed
 # changes nothing. Turning bagging on (subsample=0.8, subsample_freq=1,
@@ -65,21 +68,23 @@ PARAMS = {
 # which is what stops those scores being an honest estimate of generalisation.
 # Not worth 0.05pp.
 
+BAGGED = {**PARAMS, 'subsample': 0.8, 'subsample_freq': 1, 'colsample_bytree': 0.8}
 
-def run_fold(train_df, test_df) -> pd.DataFrame:
+
+def run_fold(train_df, test_df, features: list[str], params) -> pd.DataFrame:
     """Fit on train_df, predict test_df.
 
     Returns test_df's identifying columns plus a prediction column, so the
     caller can concatenate folds and score once at the end.
     """
-    model = lgb.LGBMRegressor(**PARAMS)
-    model.fit(train_df[FEATURES], train_df[TARGET])
-    test_df['demand_prediction'] = model.predict(test_df[FEATURES])
+    model = lgb.LGBMRegressor(**params)
+    model.fit(train_df[features], train_df[TARGET])
+    test_df['demand_prediction'] = model.predict(test_df[features])
 
     return test_df[['lead_days', 'demand_mw', 'target_ts', 'demand_prediction', 'baseline_prediction']]
 
 
-def walk_forward(df) -> pd.DataFrame:
+def walk_forward(df, features: list[str], params) -> pd.DataFrame:
     """Run every fold and return all out-of-sample predictions, concatenated."""
     train_start = pd.Timestamp(year=2024, month=7, day=1)
 
@@ -96,26 +101,68 @@ def walk_forward(df) -> pd.DataFrame:
         assert not test_df.empty
         assert train_df['target_ts'].max() < test_df['target_ts'].min()
 
-        predictions = run_fold(train_df, test_df)
+        predictions = run_fold(train_df, test_df, features, params)
         results.append(predictions)
 
     return pd.concat(results, ignore_index=True)
+
+
+def seed_sweep(df, seeds=(42, 0, 1, 2, 3)) -> pd.DataFrame:
+    """Full vs weather-ablated, bagged, once per seed.
+
+    Returns one row per (seed, lead_days) with rmse_pct_full,
+    rmse_pct_ablated and their difference -- so the three numbers the
+    README quotes all fall out of one groupby.
+    """
+    df['baseline_prediction'] = baseline_prediction(df)
+
+    runs = []
+    for seed in seeds:
+        seed_forward_df = walk_forward(df, FEATURES, {**BAGGED, 'random_state': seed})
+        seed_forward_df.dropna(subset=['baseline_prediction'], inplace=True)
+        seed_ablated_df = walk_forward(df, NON_WEATHER_FEATURES, {**BAGGED, 'random_state': seed})
+        seed_ablated_df.dropna(subset=['baseline_prediction'], inplace=True)
+
+        seed_scored_demand_forward_df = score_by_lead(seed_forward_df, 'demand_prediction')
+        seed_scored_demand_ablated_df = score_by_lead(seed_ablated_df, 'demand_prediction')
+
+        seed_scored_demand_full_ablated_df = seed_scored_demand_forward_df.merge(seed_scored_demand_ablated_df, on='lead_days', how='left', suffixes=['_full', '_ablated'])
+        seed_scored_demand_full_ablated_df['pct_diff'] = seed_scored_demand_full_ablated_df['rmse_pct_ablated'] - seed_scored_demand_full_ablated_df['rmse_pct_full']
+        seed_scored_demand_full_ablated_df['seed'] = seed
+
+        runs.append(seed_scored_demand_full_ablated_df)
+
+    all_scored_demand_full_ablated_df = pd.concat(runs, ignore_index=True)
+    
+    return all_scored_demand_full_ablated_df
 
 
 def main():
     con = get_athena_connection()
     df = load_features(con)
     con.close()
-    df['baseline_prediction'] = baseline_prediction(df)
-    
-    forward_df = walk_forward(df)
-    forward_df.dropna(subset=['baseline_prediction'], inplace=True)
-    scored_demand_df = score_by_lead(forward_df, 'demand_prediction')
-    scored_baseline_df = score_by_lead(forward_df, 'baseline_prediction')
 
-    print(scored_demand_df)
+    df['baseline_prediction'] = baseline_prediction(df)
+
+    forward_df = walk_forward(df, FEATURES, PARAMS)
+    forward_df.dropna(subset=['baseline_prediction'], inplace=True)
+    ablated_df = walk_forward(df, NON_WEATHER_FEATURES, PARAMS)
+    ablated_df.dropna(subset=['baseline_prediction'], inplace=True)
+
+    scored_baseline_df = score_by_lead(forward_df, 'baseline_prediction')
     print(scored_baseline_df)
 
+    scored_demand_df = score_by_lead(forward_df, 'demand_prediction')
+    scored_demand_ablated_df = score_by_lead(ablated_df, 'demand_prediction')
+
+    scored_demand_full_ablated_df = scored_demand_df.merge(scored_demand_ablated_df, on='lead_days', how='left', suffixes=['_full', '_ablated'])
+    scored_demand_full_ablated_df['pct_diff'] = scored_demand_full_ablated_df['rmse_pct_ablated'] - scored_demand_full_ablated_df['rmse_pct_full']
+    print(scored_demand_full_ablated_df)
+
+    all_scored_demand_full_ablated_df = seed_sweep(df)
+    print(all_scored_demand_full_ablated_df)
+
+    
 
 if __name__ == '__main__':
     main()
