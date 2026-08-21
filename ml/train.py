@@ -8,6 +8,7 @@ seasonal-naive baseline on the same rows.
 import datetime as dt
 import lightgbm as lgb
 import pandas as pd
+import numpy as np
 
 from folds import generate_folds
 from score_baseline import rmse, score_by_lead, baseline_prediction
@@ -81,7 +82,7 @@ def run_fold(train_df, test_df, features: list[str], params) -> pd.DataFrame:
     model.fit(train_df[features], train_df[TARGET])
     test_df['demand_prediction'] = model.predict(test_df[features])
 
-    return test_df[['lead_days', 'demand_mw', 'target_ts', 'demand_prediction', 'baseline_prediction']]
+    return test_df[['lead_days', 'demand_mw', 'target_ts', 'demand_prediction', 'baseline_prediction', 'is_holiday', 'temperature_2m', 'hour', 'day']]
 
 
 def walk_forward(df, features: list[str], params) -> pd.DataFrame:
@@ -137,6 +138,24 @@ def seed_sweep(df, seeds=(42, 0, 1, 2, 3)) -> pd.DataFrame:
     return all_scored_demand_full_ablated_df
 
 
+
+def error_by_slice(df, slice_key, score_prediction='demand_prediction') -> pd.DataFrame:
+    """One row per group in slice_key: n, mean signed error, rmse, rmse_pct."""
+    def score_group(g):
+        error = rmse(g['demand_mw'], g[score_prediction])
+        mean_demand = g['demand_mw'].mean()
+        return pd.Series({
+            "n": len(g),
+            "rmse": error,
+            "mean_demand": mean_demand,
+            "rmse_pct": (error / mean_demand) * 100,
+            "signed_error_mean": (g['demand_mw'] - g[score_prediction]).mean()
+        })
+
+    return df.groupby(slice_key, observed=True).apply(score_group).reset_index()
+
+
+
 def main():
     con = get_athena_connection()
     df = load_features(con)
@@ -149,19 +168,35 @@ def main():
     ablated_df = walk_forward(df, NON_WEATHER_FEATURES, PARAMS)
     ablated_df.dropna(subset=['baseline_prediction'], inplace=True)
 
-    scored_baseline_df = score_by_lead(forward_df, 'baseline_prediction')
-    print(scored_baseline_df)
+    ##### BASELINE SCORE #####
+    # scored_baseline_df = score_by_lead(forward_df, 'baseline_prediction')
+    # print(scored_baseline_df)
 
-    scored_demand_df = score_by_lead(forward_df, 'demand_prediction')
-    scored_demand_ablated_df = score_by_lead(ablated_df, 'demand_prediction')
+    # scored_demand_df = score_by_lead(forward_df, 'demand_prediction')
+    # scored_demand_ablated_df = score_by_lead(ablated_df, 'demand_prediction')
 
-    scored_demand_full_ablated_df = scored_demand_df.merge(scored_demand_ablated_df, on='lead_days', how='left', suffixes=['_full', '_ablated'])
-    scored_demand_full_ablated_df['pct_diff'] = scored_demand_full_ablated_df['rmse_pct_ablated'] - scored_demand_full_ablated_df['rmse_pct_full']
-    print(scored_demand_full_ablated_df)
+    # ##### PREDICTION SCORE WITH ABLATION COMPARISON #####
+    # scored_demand_full_ablated_df = scored_demand_df.merge(scored_demand_ablated_df, on='lead_days', how='left', suffixes=['_full', '_ablated'])
+    # scored_demand_full_ablated_df['pct_diff'] = scored_demand_full_ablated_df['rmse_pct_ablated'] - scored_demand_full_ablated_df['rmse_pct_full']
+    # print(scored_demand_full_ablated_df)
 
-    all_scored_demand_full_ablated_df = seed_sweep(df)
-    print(all_scored_demand_full_ablated_df)
+    # ##### MODEL AGAINST BAGGING #####
+    # all_scored_demand_full_ablated_df = seed_sweep(df)
+    # print(all_scored_demand_full_ablated_df)
 
+    ##### ERROR ANALYSIS #####
+    forward_df['month'] = forward_df['target_ts'].dt.month
+    forward_df['temp_band'] = pd.cut(
+        forward_df['temperature_2m'],
+        bins=[-np.inf, 0, 5, 10, 15, 20, np.inf],
+        labels=['<0', '0-5', '5-10', '10-15', '15-20', '20+'],
+    )
+
+    for slice in ['is_holiday', 'temp_band', 'month', 'hour', 'day']:
+        slice_errors = error_by_slice(forward_df, slice)
+        assert slice_errors['n'].sum() == len(forward_df)
+
+        print(slice_errors)
     
 
 if __name__ == '__main__':
