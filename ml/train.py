@@ -144,6 +144,7 @@ def error_by_slice(df, slice_key, score_prediction='demand_prediction') -> pd.Da
     def score_group(g):
         error = rmse(g['demand_mw'], g[score_prediction])
         mean_demand = g['demand_mw'].mean()
+        
         return pd.Series({
             "n": len(g),
             "rmse": error,
@@ -151,8 +152,11 @@ def error_by_slice(df, slice_key, score_prediction='demand_prediction') -> pd.Da
             "rmse_pct": (error / mean_demand) * 100,
             "signed_error_mean": (g['demand_mw'] - g[score_prediction]).mean()
         })
+    
+    grouped_df = df.groupby(slice_key, observed=True).apply(score_group).reset_index()
+    assert grouped_df['n'].sum() == len(df)
 
-    return df.groupby(slice_key, observed=True).apply(score_group).reset_index()
+    return grouped_df
 
 
 
@@ -169,20 +173,20 @@ def main():
     ablated_df.dropna(subset=['baseline_prediction'], inplace=True)
 
     ##### BASELINE SCORE #####
-    # scored_baseline_df = score_by_lead(forward_df, 'baseline_prediction')
-    # print(scored_baseline_df)
+    scored_baseline_df = score_by_lead(forward_df, 'baseline_prediction')
+    print(scored_baseline_df)
 
-    # scored_demand_df = score_by_lead(forward_df, 'demand_prediction')
-    # scored_demand_ablated_df = score_by_lead(ablated_df, 'demand_prediction')
+    scored_demand_df = score_by_lead(forward_df, 'demand_prediction')
+    scored_demand_ablated_df = score_by_lead(ablated_df, 'demand_prediction')
 
-    # ##### PREDICTION SCORE WITH ABLATION COMPARISON #####
-    # scored_demand_full_ablated_df = scored_demand_df.merge(scored_demand_ablated_df, on='lead_days', how='left', suffixes=['_full', '_ablated'])
-    # scored_demand_full_ablated_df['pct_diff'] = scored_demand_full_ablated_df['rmse_pct_ablated'] - scored_demand_full_ablated_df['rmse_pct_full']
-    # print(scored_demand_full_ablated_df)
+    ##### PREDICTION SCORE WITH ABLATION COMPARISON #####
+    scored_demand_full_ablated_df = scored_demand_df.merge(scored_demand_ablated_df, on='lead_days', how='left', suffixes=['_full', '_ablated'])
+    scored_demand_full_ablated_df['pct_diff'] = scored_demand_full_ablated_df['rmse_pct_ablated'] - scored_demand_full_ablated_df['rmse_pct_full']
+    print(scored_demand_full_ablated_df)
 
-    # ##### MODEL AGAINST BAGGING #####
-    # all_scored_demand_full_ablated_df = seed_sweep(df)
-    # print(all_scored_demand_full_ablated_df)
+    ##### MODEL AGAINST BAGGING #####
+    all_scored_demand_full_ablated_df = seed_sweep(df)
+    print(all_scored_demand_full_ablated_df)
 
     ##### ERROR ANALYSIS #####
     forward_df['month'] = forward_df['target_ts'].dt.month
@@ -192,12 +196,21 @@ def main():
         labels=['<0', '0-5', '5-10', '10-15', '15-20', '20+'],
     )
 
-    for slice in ['is_holiday', 'temp_band', 'month', 'hour', 'day']:
-        slice_errors = error_by_slice(forward_df, slice)
-        assert slice_errors['n'].sum() == len(forward_df)
-
+    for slice_key in ['is_holiday', 'temp_band', 'month', 'hour', 'day']:
+        slice_errors = error_by_slice(forward_df, slice_key)
+        
         print(slice_errors)
+
+    ##### APRIL vs NON-APRIL ##### 
+    april_forward_df = forward_df[forward_df['month'] == 4]
+    april_slice_errors = error_by_slice(april_forward_df, 'hour')
+
+    rest_forward_df = forward_df[forward_df['month'] != 4]
+    rest_slice_errors = error_by_slice(rest_forward_df, 'hour')
     
+    comp_slice_errors = april_slice_errors.merge(rest_slice_errors, on='hour', suffixes=('_april', '_rest'))
+    comp_slice_errors['rmse_pct_diff'] = comp_slice_errors['rmse_pct_april'] - comp_slice_errors['rmse_pct_rest']
+    print(comp_slice_errors)
 
 if __name__ == '__main__':
     main()
