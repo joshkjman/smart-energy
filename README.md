@@ -172,6 +172,8 @@ The fix constrains each chunk to write only the issue dates it can complete (`lo
 
 <!-- TODO: add the accuracy-over-time chart and an error-analysis note (where does it struggle — bank holidays? cold snaps?) -->
 
+Embedded solar - we need solar energy data for my increased error that I'm measuring during the day. This is because the demand data is invisible to solar energy data, and so my model doesn't use this when training so overpredicts demand during the day. Bank holidays - They probably don't set a strong enough trend (as there's not many) with a min_child_samples=20 so model fails on bank holidays a bit more. Day of week - This is flat, checking each feature for error analysis and this one didn't flag any major errors or pattern in errors. Sub-zero - For 'extreme' temperatures, you put the model into the tail ends of the tree that only knows to predict flat value (plateaus), and so usually gets it wrong and is why the error is greatest here.
+
 ---
 
 ## Relevance to Octopus Energy
