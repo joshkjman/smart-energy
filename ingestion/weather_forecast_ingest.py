@@ -14,7 +14,7 @@ LAT = 51.5085
 LON = -0.1257
 
 
-HOURLY_VARS = ["temperature_2m"]
+HOURLY_VARS = ["temperature_2m", "shortwave_radiation"]
 MAX_PREVIOUS_DAY = 7
 
 openmeteo = openmeteo_requests.Client()
@@ -26,7 +26,7 @@ def fetch_previous_runs(start_date: dt.date, end_date: dt.date) -> pd.DataFrame:
     prev_model_params = {
         "latitude": LAT,
         "longitude": LON,
-        "hourly": HOURLY_VARS + [f"{HOURLY_VARS[0]}_previous_day{n}" for n in range(1, MAX_PREVIOUS_DAY + 1)],
+        "hourly": HOURLY_VARS + [f"{var}_previous_day{n}" for var in HOURLY_VARS for n in range(1, MAX_PREVIOUS_DAY + 1)],
         "start_date": f"{start_date:%Y-%m-%d}",
         "end_date":   f"{end_date:%Y-%m-%d}",
     }
