@@ -16,6 +16,9 @@ from athena import get_athena_connection
 
 
 
+pd.set_option('display.width', 200)
+pd.set_option('display.max_columns', None)
+
 FEATURES = [
     'hour',
     'day', 
@@ -24,11 +27,12 @@ FEATURES = [
     'temperature_2m', 
     'heating_degrees', 
     'cooling_degrees', 
+    'shortwave_radiation',
     'demand_lag_mw', 
     'lag_7d', 
     'lag_14d'
 ]
-WEATHER_FEATURES = ['temperature_2m', 'heating_degrees', 'cooling_degrees']
+WEATHER_FEATURES = ['temperature_2m', 'heating_degrees', 'cooling_degrees', 'shortwave_radiation']
 NON_WEATHER_FEATURES = [f for f in FEATURES if f not in WEATHER_FEATURES]
 TARGET = "demand_mw"
 CATEGORICAL = [

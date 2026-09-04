@@ -20,6 +20,8 @@ models:
         description: The date that prediction was made for that particular target date
       - name: temperature_2m
         description: Max temperature value when pivoting
+      - name: shortwave_radiation
+        description: Shortwave radiation when pivoting
   - name: stg_bank_holidays
     description: staging table for bank holiday data
     columns:

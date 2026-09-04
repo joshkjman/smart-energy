@@ -34,6 +34,8 @@ models:
         description: Temperature prediction for target_ts run at issue_ts
         data_tests:
           - not_null
+      - name: shortwave_radiation
+        description: Shortwave radiation prediction for target_ts run at issue_ts
       - name: hour
         description: The hour in the day in the Europe/London timezone
       - name: lag_7d

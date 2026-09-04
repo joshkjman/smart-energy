@@ -64,6 +64,7 @@ select
     temperature_2m,
     greatest({{ var('base_temperature') }} - temperature_2m, 0) as heating_degrees,
     greatest(temperature_2m - {{ var('base_temperature') }}, 0) as cooling_degrees,
+    shortwave_radiation,
     cutoff,
     issue_ts,
     demand_lag_ts
