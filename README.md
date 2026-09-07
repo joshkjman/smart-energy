@@ -131,36 +131,41 @@ Error is RMSE as a percentage of mean demand. Both rows are scored on identical 
 
 | Lead (days) | Baseline | LightGBM | Improvement |
 |---|---|---|---|
-| 0 | 10.96% | **6.11%** | −44% |
-| 1 | 10.96% | **7.87%** | −28% |
-| 2 | 10.96% | **7.93%** | −28% |
-| 3 | 10.96% | **8.01%** | −27% |
-| 4 | 10.96% | **8.29%** | −24% |
-| 5 | 10.96% | **8.44%** | −23% |
-| 6 | 10.96% | **8.47%** | −23% |
-| 7 | 12.33% | **9.05%** | −27% |
+| 0 | 10.96% | **5.53%** | −49.5% |
+| 1 | 10.96% | **6.73%** | −38.6% |
+| 2 | 10.96% | **6.66%** | −39.2% |
+| 3 | 10.96% | **6.99%** | −36.2% |
+| 4 | 10.96% | **7.21%** | −34.2% |
+| 5 | 10.96% | **7.58%** | −30.8% |
+| 6 | 10.96% | **7.94%** | −27.6% |
+| 7 | 12.33% | **8.64%** | −29.9% |
 
-The baseline is identical across leads 0–6 because `lag_7d` for a given target hour does not depend on how far ahead you are standing; lead 7 differs only because the publication gate forces the fallback to `lag_14d`. Model error, by contrast, degrades monotonically with the horizon — which is the behaviour you want to see, and a useful check that nothing is leaking.
+The baseline is identical across leads 0–6 because `lag_7d` for a given target hour does not depend on how far ahead you are standing; lead 7 differs only because the publication gate forces the fallback to `lag_14d`. Model error, by contrast, degrades with the horizon — which is the behaviour you want to see, and a useful check that nothing is leaking.
 
 The model is given the baseline's own anchors as features, so the baseline is a degenerate case of the model rather than a competitor with different information. Beating it means the remaining features carry *signal* beyond the anchor.
 
 ### What the weather forecast is worth
 
-Removing the three weather features (`temperature_2m` and the HDD/CDD hinges) and re-running:
+Removing the four weather features (`temperature_2m`, the HDD/CDD hinges, and `shortwave_radiation`) and re-running:
 
-| Lead (days) | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
-|---|---|---|---|---|---|---|---|
-| Error added by removing weather (pp) | +0.15 | +0.52 | +0.67 | +0.68 | +0.82 | +0.87 | +0.86 |
+| Lead (days) | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| ablation gap before radiation was added | −0.47 | +0.15 | +0.52 | +0.67 | +0.68 | +0.82 | +0.87 | +0.86 |
+| ablation gap now | +0.11 | +1.28 | +1.80 | +1.70 | +1.77 | +1.67 | +1.41 | +1.28 |
 
-Weather barely moves the average error — what it does is **flatten the degradation curve across the horizon**. Error growth from lead 1 to lead 6 is +0.61pp with weather and +1.33pp without. At short leads a recent demand reading carries almost everything; by day 6 it is stale and the issued forecast is the only genuinely forward-looking input left. That is the entire justification for the point-in-time weather pipeline.
+Beyond day 0 the weather block is worth between 1.3 and 1.8pp — roughly a fifth of the model's total error at those leads. The benefit is close to flat across the horizon rather than growing with it: error growth from lead 1 to lead 6 is +1.21pp with weather and +1.33pp without. Weather is buying a level shift, not a slower decay.
 
-At lead 0 the weather features make the model *worse* (5.64% → 6.11%): with a 2-hour-old demand reading available they add little beyond noise. One pooled model across all leads cannot spend its capacity differently per horizon, so the splits it needs at lead 7 cost it something at lead 0 — a measured trade-off of pooling rather than an assumed one.
+That is what justifies the point-in-time pipeline. If the forecast only mattered once the recent demand reading went stale, it would be a late-horizon top-up and a sloppier weather source would cost little. Instead it carries a fifth of the accuracy at *every* horizon the model serves — so it has to be the forecast **as issued**, at every lead, or the number above is measuring information the model will never have at prediction time.
+
+The two rows above are the same measurement taken before and after `shortwave_radiation` was added; neither is an absolute error. One irradiance feature more than doubled what the whole weather block is worth — the error analysis below explains why.
+
+At lead 0 the effect all but vanishes (+0.11pp): with a demand reading two hours old, weather adds little the lag does not already carry. Before radiation the pooled model was measurably *worse* with weather at lead 0; that penalty is now gone.
 
 ### Is any of this noise?
 
 The model is fitted with LightGBM's bagging and column sampling left off, which makes the fit fully deterministic — so `random_state` is inert and repeated runs are byte-identical. That is good for reproducibility but proves nothing about stability, so the seed sweep was re-run with bagging *enabled* to get a genuine noise floor: run-to-run standard deviation is **0.01–0.03pp**, with a total spread across five seeds of at most 0.07pp.
 
-Against that floor, the weather effects are real. The lead-0 penalty lands between −0.41 and −0.47pp across every seed — same sign each time, roughly seven times the spread — and the lead-6 gain never drops below +0.87pp.
+Against that floor, the weather effects are real. The lead-2 gain never drops below +1.80pp across the five seeds and the lead-6 gain never below +1.39pp — same sign every time, roughly a hundred times the run-to-run spread. Lead 0 is the only marginal case: +0.13 to +0.21pp under bagging, or +0.11pp in the deterministic headline run above. Small, but positive in every seed.
 
 Hyperparameters are deliberately untuned. Enabling bagging measured ~0.05pp better at every lead, but adopting it would mean selecting a hyperparameter by reading the walk-forward scores, at which point those scores stop being an unbiased estimate of generalisation. The 0.05pp is not worth that.
 
@@ -170,9 +175,32 @@ An early version of these numbers was computed on a mart where lead 0 had 29% fe
 
 The fix constrains each chunk to write only the issue dates it can complete (`lo … hi − 7`) and advances the window so those *writable* ranges tile contiguously. Row counts per lead are now flat to within the expected one-day-per-lead boundary effect, and every landed partition carries all eight lead offsets.
 
-<!-- TODO: add the accuracy-over-time chart and an error-analysis note (where does it struggle — bank holidays? cold snaps?) -->
+### Where the model struggles
 
-Embedded solar - we need solar energy data for my increased error that I'm measuring during the day. This is because the demand data is invisible to solar energy data, and so my model doesn't use this when training so overpredicts demand during the day. Bank holidays - They probably don't set a strong enough trend (as there's not many) with a min_child_samples=20 so model fails on bank holidays a bit more. Day of week - This is flat, checking each feature for error analysis and this one didn't flag any major errors or pattern in errors. Sub-zero - For 'extreme' temperatures, you put the model into the tail ends of the tree that only knows to predict flat value (plateaus), and so usually gets it wrong and is why the error is greatest here.
+Error is not spread evenly. Four slices, in descending order of what they cost.
+
+**Embedded solar — the largest, and now partly fixed.** Error concentrates in daylight: hours 10–14 run 9.6–10.4% against 5.0% at hour 20, and the signed error is *negative* right through the middle of the day, meaning the model was over-predicting. April was the worst month at 10.32%, with a mean signed error of −912 MW.
+
+The cause is a metering boundary, not anything in the model. GB "national demand" is measured at the **transmission** boundary. Almost all GB solar is *embedded* — sited on the **distribution** network, downstream of that meter. Its output never crosses the boundary, so it never appears as generation; it appears as demand that failed to arrive. With no feature that could see irradiance, the model predicted the demand that would have existed without it.
+
+That gave a falsifiable prediction, written down before the fix: adding irradiance should close the April-vs-rest gap **in daylight hours only**. A feature that improved every hour equally would be proxying for season or time of day, not for solar.
+
+| April-vs-rest RMSE gap (pp) | hour 0 | hour 3 | hour 6 | hour 12 | hour 13 | hour 14 | hour 23 |
+|---|---|---|---|---|---|---|---|
+| before `shortwave_radiation` | −0.89 | +0.50 | −1.68 | +11.22 | +11.77 | +11.83 | −0.44 |
+| after | −0.72 | +0.77 | −1.47 | **+9.42** | **+9.69** | **+9.21** | −0.11 |
+
+The prediction held: midday moved, overnight did not. April as a whole fell 12.09% → 10.32%, and hour 20 was unchanged at 5.00% → 4.99%.
+
+The honest reading is that embedded solar is a **confirmed contributor, not the whole cause** — roughly a fifth of the midday gap closed and some 9pp of it remains. One candidate for the rest: irradiance is taken at a single London grid point, a poor proxy for GB-wide sunshine when the solar fleet is spread across the country. That is a hypothesis for next time, not a conclusion.
+
+**Bank holidays.** 13.52% against 7.05% on ordinary days, with a signed error of −1,397 MW — the model consistently expects more demand than arrives. Holidays are 2.2% of rows (1,536 of 70,080), and with `min_child_samples=20` there are too few of them to earn many splits of their own, so `is_holiday` cannot outvote the weekday pattern it competes with. The lag features actively work against it: `lag_7d` for a bank holiday is an ordinary working day.
+
+**Sub-zero temperatures.** Below 0°C the model **under**-predicts by +990 MW on average — by far the largest signed bias of any temperature band, where the next largest is +207 MW. This is a bias rather than a magnitude problem: at 7.31%, RMSE in the cold tail is actually *lower* than the 0–5°C band's 8.23%. A tree predicts a constant within each leaf and so cannot extrapolate; the coldest leaf is fitted mostly on rows warmer than the extreme, and its flat prediction falls short of what genuinely cold weather does to demand. There are 523 such rows, 0.7% of the set — which makes this a case for more data in the tail rather than more model.
+
+**Day of week — a null result worth stating.** RMSE spans 6.66% to 7.77% across the seven days and the signed error stays within ±202 MW. That is a negative control passing: weekly seasonality is already being carried by the calendar features, and the residual structure lives in weather and in the holiday calendar instead. It is recorded here because it redirected effort — the next thing to investigate was not a day-of-week interaction.
+
+<!-- TODO: add the accuracy-over-time chart -->
 
 ---
 
