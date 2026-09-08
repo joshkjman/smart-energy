@@ -1,0 +1,4 @@
+-r requirements-base.txt
+lightgbm==4.7.0
+scikit-learn==1.9.0
+pyathena==3.34.0
