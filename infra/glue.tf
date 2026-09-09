@@ -11,7 +11,7 @@ resource "aws_glue_catalog_table" "demand" {
     "projection.settlement_date.range"         = "2024-07-01,NOW"
     "projection.settlement_date.interval"      = "1"
     "projection.settlement_date.interval.unit" = "DAYS"
-    "storage.location.template"                = "s3://smart-energy-lake/bronze/demand/settlement_date=$${settlement_date}"
+    "storage.location.template"                = "s3://${aws_s3_bucket.smart_energy_bucket.bucket}/bronze/demand/settlement_date=$${settlement_date}"
   }
 
   partition_keys {

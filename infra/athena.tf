@@ -8,7 +8,7 @@ resource "aws_athena_workgroup" "foresight_queries" {
     bytes_scanned_cutoff_per_query     = 104857600
 
     result_configuration {
-      output_location = "s3://smart-energy-lake/athena-results/"
+      output_location = "s3://${aws_s3_bucket.smart_energy_bucket.bucket}/athena-results/"
 
       encryption_configuration {
         encryption_option = "SSE_S3"
