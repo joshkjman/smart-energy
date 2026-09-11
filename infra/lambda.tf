@@ -11,10 +11,10 @@ data "archive_file" "layer_zip" {
   type        = "zip"
   source_dir  = "${path.module}/../build/layer"
   output_path = "${path.module}/../build/layer.zip"
-  excludes    = [
-      "**/__pycache__/**",
-      "**/tests/**",
-      "python/bin/**",
+  excludes = [
+    "**/__pycache__/**",
+    "**/tests/**",
+    "python/bin/**",
   ]
 }
 
