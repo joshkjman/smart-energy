@@ -34,3 +34,25 @@ resource "aws_lambda_layer_version" "ingest_lambda_layer" {
   compatible_architectures = ["x86_64"]
 }
 
+resource "aws_lambda_function" "ingest_lambda_function" {
+  filename      = data.archive_file.code_zip.output_path
+  function_name = local.weather_ingest_function_name
+  role          = aws_iam_role.weather_ingest.arn
+  handler       = "ingestion.weather_forecast_live_ingest.handler"
+  runtime       = "python3.12"
+
+  architectures = ["x86_64"]
+
+  layers = [aws_lambda_layer_version.ingest_lambda_layer.arn]
+
+  timeout          = 60
+  memory_size      = 512
+  depends_on       = [aws_cloudwatch_log_group.weather_ingest]
+  source_code_hash = data.archive_file.code_zip.output_base64sha256
+
+  environment {
+    variables = {
+      BRONZE_BUCKET = aws_s3_bucket.smart_energy_bucket.bucket
+    }
+  }
+}

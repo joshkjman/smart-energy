@@ -11,7 +11,7 @@ BRONZE_PREFIX = "bronze/weather_forecast"
 LAT = 51.5085
 LON = -0.1257
 
-HOURLY_VARS = ["temperature_2m"]
+HOURLY_VARS = ["temperature_2m", "shortwave_radiation"]
 openmeteo = openmeteo_requests.Client()
 
 
@@ -93,7 +93,7 @@ def main() -> None:
         '{"data":' + group.to_json(orient='records', date_format='iso') + '}'
     """
     df = fetch_forecast(7)
-    long_df = reshape_to_long(df, dt.date.today())
+    long_df = reshape_to_long(df, dt.datetime.now(dt.timezone.utc).date())
     validate(long_df)
     
     for name, group in long_df.groupby('issue_ts'):
@@ -102,7 +102,10 @@ def main() -> None:
         write_bronze(key, body)
 
 
+def handler(event, context):
+    main()
+
+
 
 if __name__ == "__main__":
     main()
-
