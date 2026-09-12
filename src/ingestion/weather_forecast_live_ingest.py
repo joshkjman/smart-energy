@@ -92,7 +92,7 @@ def main() -> None:
       - serialize the body the same way the backfill does:
         '{"data":' + group.to_json(orient='records', date_format='iso') + '}'
     """
-    df = fetch_forecast(7)
+    df = fetch_forecast(8)
     long_df = reshape_to_long(df, dt.datetime.now(dt.timezone.utc).date())
     validate(long_df)
     
