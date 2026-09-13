@@ -10,7 +10,7 @@ data "aws_iam_policy_document" "lambda_trust" {
   }
 }
 
-data "aws_iam_policy_document" "weather_ingest_permissions" {
+data "aws_iam_policy_document" "weather_ingestion_permissions" {
   statement {
     effect    = "Allow"
     actions   = ["s3:PutObject"]
@@ -23,7 +23,28 @@ data "aws_iam_policy_document" "weather_ingest_permissions" {
       "logs:CreateLogStream",
       "logs:PutLogEvents"
     ]
-    resources = ["${aws_cloudwatch_log_group.weather_ingest.arn}:*"]
+    resources = [
+      "${aws_cloudwatch_log_group.weather_ingest.arn}:*",
+    ]
+  }
+}
+
+data "aws_iam_policy_document" "demand_ingestion_permissions" {
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.smart_energy_bucket.arn}/bronze/demand/*"]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    resources = [
+      "${aws_cloudwatch_log_group.demand_ingest.arn}:*",
+    ]
   }
 }
 
@@ -32,8 +53,19 @@ resource "aws_iam_role" "weather_ingest" {
   assume_role_policy = data.aws_iam_policy_document.lambda_trust.json
 }
 
+resource "aws_iam_role" "demand_ingest" {
+  name               = "${local.demand_ingest_function_name}-role"
+  assume_role_policy = data.aws_iam_policy_document.lambda_trust.json
+}
+
 resource "aws_iam_role_policy" "weather_ingest" {
   name   = "weather_ingest_policy"
   role   = aws_iam_role.weather_ingest.id
-  policy = data.aws_iam_policy_document.weather_ingest_permissions.json
+  policy = data.aws_iam_policy_document.weather_ingestion_permissions.json
+}
+
+resource "aws_iam_role_policy" "demand_ingest" {
+  name   = "demand_ingest_policy"
+  role   = aws_iam_role.demand_ingest.id
+  policy = data.aws_iam_policy_document.demand_ingestion_permissions.json
 }
