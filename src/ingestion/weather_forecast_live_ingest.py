@@ -47,15 +47,7 @@ def fetch_forecast(forecast_days: int) -> pd.DataFrame:
 
 
 def reshape_to_long(wide: pd.DataFrame, run_date: dt.date) -> pd.DataFrame:
-    """Wide -> long, matching the backfill schema: target_ts, issue_ts, variable, value.
-
-    TODO:
-      - melt on the VARIABLE columns (id_vars=['date']) -> (variable, value)
-        NOTE: this melts a DIFFERENT axis than the backfill (issue axis there).
-      - rename date -> target_ts
-      - issue_ts is a SINGLE constant for every row: pd.Timestamp(run_date, tz='UTC')
-        (day resolution, so it lines up with the backfill's issue_ts)
-    """
+    """Wide -> long, matching the backfill schema: target_ts, issue_ts, variable, value."""
     long_df = pd.melt(wide, id_vars=['date'])
     long_df.rename(columns={'date': 'target_ts'}, inplace=True)
     long_df['issue_ts'] = pd.Timestamp(run_date, tz='UTC')
@@ -83,14 +75,7 @@ def bronze_key(issue_ts: dt.date) -> str:
 
 
 def main() -> None:
-    """Live entry point: fetch -> reshape (run_date=today) -> validate -> land.
-
-    TODO:
-      - fetch_forecast(7), reshape with run_date = today, validate
-      - group by issue_ts and write each group (here that's exactly ONE group)
-      - serialize the body the same way the backfill does:
-        '{"data":' + group.to_json(orient='records', date_format='iso') + '}'
-    """
+    """Live entry point: fetch -> reshape (run_date=today) -> validate -> land."""
     df = fetch_forecast(8)
     long_df = reshape_to_long(df, dt.datetime.now(dt.timezone.utc).date())
     validate(long_df)
