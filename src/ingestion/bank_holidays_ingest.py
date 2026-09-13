@@ -3,6 +3,7 @@ import json
 
 from ingestion.bronze_io import write_bronze
 
+
 BANK_HOLIDAYS_URL = "https://www.gov.uk/bank-holidays.json"
 BRONZE_PREFIX = "bronze/bank_holidays"
 DIVISION = "england-and-wales"

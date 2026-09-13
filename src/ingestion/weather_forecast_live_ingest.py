@@ -1,5 +1,4 @@
 import datetime as dt
-
 import openmeteo_requests
 import pandas as pd
 

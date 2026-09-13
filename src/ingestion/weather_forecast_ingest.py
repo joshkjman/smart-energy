@@ -1,10 +1,11 @@
 import datetime as dt
-from datetime import timedelta
-from ingestion.bronze_io import write_bronze
 import openmeteo_requests
 import pandas as pd
 import json
 import pathlib
+
+from datetime import timedelta
+from ingestion.bronze_io import write_bronze
 
 
 PREV_RUNS_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
@@ -13,7 +14,6 @@ BRONZE_PREFIX = "bronze/weather_forecast"
 LAT = 51.5085
 LON = -0.1257
 
-
 HOURLY_VARS = ["temperature_2m", "shortwave_radiation"]
 MAX_PREVIOUS_DAY = 7
 
@@ -21,8 +21,7 @@ openmeteo = openmeteo_requests.Client()
 
 
 def fetch_previous_runs(start_date: dt.date, end_date: dt.date) -> pd.DataFrame:
-    """Pull Previous Runs between start_date and end_date, and return a WIDE dataframe.
-    """
+    """Pull Previous Runs between start_date and end_date, and return a WIDE dataframe."""
     prev_model_params = {
         "latitude": LAT,
         "longitude": LON,
@@ -35,13 +34,13 @@ def fetch_previous_runs(start_date: dt.date, end_date: dt.date) -> pd.DataFrame:
 
     prev_model_hourly = prev_model_response.Hourly()
     prev_model_hourly_data = {
-            "date": pd.date_range(
-                start = pd.to_datetime(prev_model_hourly.Time(), unit = "s", utc = True),
-                end =  pd.to_datetime(prev_model_hourly.TimeEnd(), unit = "s", utc = True),
-                freq = pd.Timedelta(seconds = prev_model_hourly.Interval()),
-                inclusive = "left"
-            )
-        }
+        "date": pd.date_range(
+            start = pd.to_datetime(prev_model_hourly.Time(), unit = "s", utc = True),
+            end =  pd.to_datetime(prev_model_hourly.TimeEnd(), unit = "s", utc = True),
+            freq = pd.Timedelta(seconds = prev_model_hourly.Interval()),
+            inclusive = "left"
+        )
+    }
     
     for i, name in enumerate(prev_model_params['hourly']):
         prev_model_hourly_data[name] = prev_model_hourly.Variables(i).ValuesAsNumpy()
@@ -52,8 +51,7 @@ def fetch_previous_runs(start_date: dt.date, end_date: dt.date) -> pd.DataFrame:
 
 
 def reshape_to_long(wide: pd.DataFrame) -> pd.DataFrame:
-    """Melt the wide previous_dayN columns into long, issue-stamped records.
-    """
+    """Melt the wide previous_dayN columns into long, issue-stamped records."""
     long_df = pd.melt(wide, id_vars=['date'])
     long_df.rename(columns={'date': 'target_ts'}, inplace=True)
     long_df['N'] = long_df['variable'].str.extract(r'previous_day(\d+)').fillna(0).astype(int)
@@ -63,8 +61,7 @@ def reshape_to_long(wide: pd.DataFrame) -> pd.DataFrame:
 
 
 def validate(long_df: pd.DataFrame) -> None:
-    """Tripwire on the reshaped frame BEFORE landing. Raise on anything unusable.
-    """   
+    """Tripwire on the reshaped frame BEFORE landing. Raise on anything unusable."""   
     if long_df.empty:
         raise ValueError('DataFrame is empty')
     
@@ -73,10 +70,8 @@ def validate(long_df: pd.DataFrame) -> None:
             raise ValueError(f'Missing column {required_col}')
 
 
-
 def bronze_key(issue_ts: dt.date) -> str:
-    """Deterministic key for one issue_date's forecast records. (Same idea as demand.)         
-    """
+    """Deterministic key for one issue_date's forecast records. (Same idea as demand.)"""
     return f"{BRONZE_PREFIX}/issue_date={issue_ts:%Y-%m-%d}/forecast.json"
 
 
@@ -91,8 +86,7 @@ def daterange_chunks(start: dt.date, end: dt.date, chunk_days: int):
 
 
 def main() -> None:
-    """Backfill entry point: fetch -> reshape -> validate -> land per issue_date.
-    """
+    """Backfill entry point: fetch -> reshape -> validate -> land per issue_date."""
     backfill_start = dt.date(2024,7,1)
     backfill_end = dt.date(2026,7,11)
     for low, high in daterange_chunks(backfill_start, backfill_end, 30): # calls function on every iteration, with yield, returning one date range at a time
