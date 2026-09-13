@@ -87,8 +87,11 @@ def daterange_chunks(start: dt.date, end: dt.date, chunk_days: int):
 
 def main() -> None:
     """Backfill entry point: fetch -> reshape -> validate -> land per issue_date."""
-    backfill_start = dt.date(2024,7,1)
-    backfill_end = dt.date(2026,7,11)
+    backfill_start = dt.date(2026,7,11)
+    # Target window runs MAX_PREVIOUS_DAY past today so the `high - MAX_PREVIOUS_DAY`
+    # guard below lands on today: a run issued today already contains its forward
+    # predictions, so those target dates are fetchable even though they're future.
+    backfill_end = dt.datetime.now(dt.timezone.utc).date() + timedelta(days=MAX_PREVIOUS_DAY)
     for low, high in daterange_chunks(backfill_start, backfill_end, 30): # calls function on every iteration, with yield, returning one date range at a time
         prev_model_hourly_data_df = fetch_previous_runs(low, high)
         long_df = reshape_to_long(prev_model_hourly_data_df)

@@ -1,15 +1,19 @@
-from collections import defaultdict
-from ingestion.bronze_io import write_bronze
 import datetime as dt
 import requests
 import json
 import pathlib
+
+from collections import defaultdict
+from ingestion.bronze_io import write_bronze
 from datetime import timedelta
 
 
 BASE_URL = "https://data.elexon.co.uk/bmrs/api/v1"
 DEMAND_OUTTURN_PATH = "/demand/outturn"
 BRONZE_PREFIX = "bronze/demand"
+
+BACKFILL_START = dt.date(2024,7,1)
+BACKFILL_END = dt.date(2026,7,11)
 
 
 def fetch_demand_outturn(date_from: dt.date, date_to: dt.date) -> dict:
@@ -61,12 +65,9 @@ def daterange_chunks(start: dt.date, end: dt.date, chunk_days: int):
         cur = hi + timedelta(days=1)
 
 
-def main() -> None:
-    """Local entry point: pull a date range and land it. Lambda handler comes later.
-    """
-    backfill_start = dt.date(2024,7,1)
-    backfill_end = dt.date(2026,7,11)
-    for low, high in daterange_chunks(backfill_start, backfill_end, 28): # calls function on every iteration, with yield, returning one date range at a time
+def ingest_range(date_from: dt.date, date_to: dt.date) -> None:
+    """Fetch, validate and land every settlement date in [date_from, date_to]"""
+    for low, high in daterange_chunks(date_from, date_to, 28): # calls function on every iteration, with yield, returning one date range at a time
         payload = fetch_demand_outturn(low, high)
         validate(payload)
 
@@ -81,9 +82,17 @@ def main() -> None:
             write_bronze(key, body)
 
 
+def main() -> None:
+    """Local entry point: pull a date range and land it. Lambda handler comes later."""
+    ingest_range(BACKFILL_START, BACKFILL_END)
+
+    
+def handler(event, context):
+    today = dt.datetime.now(dt.timezone.utc).date()
+    diff = dt.timedelta(days=7)
+    ingest_range(today-diff, today)
+
 
 if __name__ == "__main__":
-    main()
-
-# payload = fetch_demand_outturn(dt.date(2026,6,1), dt.date(2026,6,1))
-# print(payload)
+    ingest_range(dt.date(2026,7,12), dt.datetime.now(dt.timezone.utc).date())
+    #main()
