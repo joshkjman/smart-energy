@@ -1,8 +1,6 @@
 import datetime as dt
 import openmeteo_requests
 import pandas as pd
-import json
-import pathlib
 
 from datetime import timedelta
 from ingestion.bronze_io import write_bronze
@@ -16,6 +14,9 @@ LON = -0.1257
 
 HOURLY_VARS = ["temperature_2m", "shortwave_radiation"]
 MAX_PREVIOUS_DAY = 7
+
+BACKFILL_START = dt.date(2026,7,11)
+BACKFILL_END = dt.datetime.now(dt.timezone.utc).date()
 
 openmeteo = openmeteo_requests.Client()
 
@@ -76,8 +77,17 @@ def bronze_key(issue_ts: dt.date) -> str:
 
 
 def daterange_chunks(start: dt.date, end: dt.date, chunk_days: int):
-    """Yield (chunk_start, chunk_end) inclusive windows, each ≤ chunk_days wide.
-    Last window clamps to `end`."""
+    """Yield overlapping (chunk_start, chunk_end) TARGET-date windows, inclusive,
+    each <= chunk_days wide.
+
+    A window [lo, hi] can only write issue dates lo .. hi - MAX_PREVIOUS_DAY complete,
+    because each issue date needs its full target span. So consecutive windows overlap
+    by MAX_PREVIOUS_DAY (next start = previous end + 1 - MAX_PREVIOUS_DAY), which makes
+    those writable issue ranges tile with no gaps. Stops once no complete issue date
+    remains (start + MAX_PREVIOUS_DAY > end); the last window clamps to `end`.
+
+    Not the same as demand_ingest.daterange_chunks, which does not overlap.
+    """
     cur = start
     while cur + timedelta(days=MAX_PREVIOUS_DAY) <= end:
         hi = min(cur + timedelta(days=(chunk_days - 1)) , end)
@@ -85,25 +95,22 @@ def daterange_chunks(start: dt.date, end: dt.date, chunk_days: int):
         cur = hi + timedelta(days=1) - timedelta(days=MAX_PREVIOUS_DAY)
 
 
-def main() -> None:
-    """Backfill entry point: fetch -> reshape -> validate -> land per issue_date."""
-    backfill_start = dt.date(2026,7,11)
-    # Target window runs MAX_PREVIOUS_DAY past today so the `high - MAX_PREVIOUS_DAY`
-    # guard below lands on today: a run issued today already contains its forward
-    # predictions, so those target dates are fetchable even though they're future.
-    backfill_end = dt.datetime.now(dt.timezone.utc).date() + timedelta(days=MAX_PREVIOUS_DAY)
-    for low, high in daterange_chunks(backfill_start, backfill_end, 30): # calls function on every iteration, with yield, returning one date range at a time
+def ingest_range(date_from: dt.date, date_to: dt.date) -> None:
+    """Fetch, validate and land every ISSUE date in [date_from, date_to], inclusive.
+
+    Issue date D needs targets D .. D + MAX_PREVIOUS_DAY, so the target window fetched
+    runs MAX_PREVIOUS_DAY past date_to. Those future target dates are fetchable: a run
+    issued on date_to already contains its forward predictions.
+    """
+    for low, high in daterange_chunks(date_from, date_to  + timedelta(days=MAX_PREVIOUS_DAY), 30): # calls function on every iteration, with yield, returning one date range at a time
         prev_model_hourly_data_df = fetch_previous_runs(low, high)
         long_df = reshape_to_long(prev_model_hourly_data_df)
-        print(long_df.value_counts('issue_ts'))
         validate(long_df)
 
         # An issue_date can only be written complete if its full target span
         # (D .. D+7) sits inside this chunk. Writing the others would land a
         # truncated file under a key the next chunk also owns -- last write wins,
         # and the partial one silently survives.
-        # Cost: the final 7 issue dates of the backfill are never written, since
-        # their targets run past backfill_end. Deliberate.
         write_from = pd.Timestamp(low, tz='UTC')
         write_to = pd.Timestamp(high, tz='UTC') - timedelta(days=MAX_PREVIOUS_DAY)
         long_df_corrected = long_df[(long_df['issue_ts'] >= write_from) & (long_df['issue_ts'] <= write_to)]
@@ -112,6 +119,11 @@ def main() -> None:
             key = bronze_key(name)
             body = '{"data":' + group.to_json(orient='records', date_format='iso') + '}'
             write_bronze(key, body)
+
+
+def main() -> None:
+    """Local entry point: pull a date range and land it."""
+    ingest_range(BACKFILL_START, BACKFILL_END)
 
 
 if __name__ == "__main__":
