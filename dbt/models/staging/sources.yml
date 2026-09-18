@@ -5,5 +5,13 @@ sources:
       external_location: "../data/bronze/{name}/**/*.json"   # {name} → the table name below
     tables:
       - name: demand
+        loaded_at_field: "cast(settlement_date as timestamp)"
+        freshness:
+          warn_after: {count: 30, period: hour}
+          error_after: {count: 48, period: hour}
       - name: weather_forecast
+        loaded_at_field: "cast(issue_date as timestamp)"
+        freshness:
+          warn_after: {count: 30, period: hour}
+          error_after: {count: 48, period: hour}
       - name: bank_holidays
