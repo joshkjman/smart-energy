@@ -83,7 +83,7 @@ def ingest_range(date_from: dt.date, date_to: dt.date) -> None:
 
 
 def main() -> None:
-    """Local entry point: pull a date range and land it. Lambda handler comes later."""
+    """Local entry point: pull a date range and land it."""
     ingest_range(BACKFILL_START, BACKFILL_END)
 
     

@@ -20,7 +20,7 @@ resource "aws_glue_catalog_table" "demand" {
   }
 
   storage_descriptor {
-    location      = "s3://smart-energy-lake/bronze/demand/"
+    location      = "s3://${aws_s3_bucket.smart_energy_bucket.bucket}/bronze/demand/"
     input_format  = "org.apache.hadoop.mapred.TextInputFormat"
     output_format = "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
 
@@ -49,7 +49,7 @@ resource "aws_glue_catalog_table" "weather_forecast" {
     "projection.issue_date.range"         = "2024-06-24,NOW"
     "projection.issue_date.interval"      = "1"
     "projection.issue_date.interval.unit" = "DAYS"
-    "storage.location.template"           = "s3://smart-energy-lake/bronze/weather_forecast/issue_date=$${issue_date}"
+    "storage.location.template"           = "s3://${aws_s3_bucket.smart_energy_bucket.bucket}/bronze/weather_forecast/issue_date=$${issue_date}"
   }
 
   partition_keys {
@@ -58,7 +58,7 @@ resource "aws_glue_catalog_table" "weather_forecast" {
   }
 
   storage_descriptor {
-    location      = "s3://smart-energy-lake/bronze/weather_forecast/"
+    location      = "s3://${aws_s3_bucket.smart_energy_bucket.bucket}/bronze/weather_forecast/"
     input_format  = "org.apache.hadoop.mapred.TextInputFormat"
     output_format = "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
 
@@ -84,7 +84,7 @@ resource "aws_glue_catalog_table" "bank_holidays" {
   }
 
   storage_descriptor {
-    location      = "s3://smart-energy-lake/bronze/bank_holidays/"
+    location      = "s3://${aws_s3_bucket.smart_energy_bucket.bucket}/bronze/bank_holidays/"
     input_format  = "org.apache.hadoop.mapred.TextInputFormat"
     output_format = "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
 
