@@ -38,7 +38,7 @@ resource "aws_lambda_function" "weather_ingest_lambda_function" {
   filename      = data.archive_file.code_zip.output_path
   function_name = local.weather_ingest_function_name
   role          = aws_iam_role.weather_ingest.arn
-  handler       = "ingestion.weather_forecast_live_ingest.handler"
+  handler       = "ingestion.weather_forecast_ingest.handler"
   runtime       = "python3.12"
 
   architectures = ["x86_64"]

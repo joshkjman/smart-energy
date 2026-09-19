@@ -29,6 +29,7 @@ def fetch_previous_runs(start_date: dt.date, end_date: dt.date) -> pd.DataFrame:
         "hourly": HOURLY_VARS + [f"{var}_previous_day{n}" for var in HOURLY_VARS for n in range(1, MAX_PREVIOUS_DAY + 1)],
         "start_date": f"{start_date:%Y-%m-%d}",
         "end_date":   f"{end_date:%Y-%m-%d}",
+        "models": "gfs_seamless",
     }
     prev_model_responses = openmeteo.weather_api(PREV_RUNS_URL, params = prev_model_params)
     prev_model_response = prev_model_responses[0]
@@ -124,6 +125,11 @@ def ingest_range(date_from: dt.date, date_to: dt.date) -> None:
 def main() -> None:
     """Local entry point: pull a date range and land it."""
     ingest_range(BACKFILL_START, BACKFILL_END)
+
+
+def handler(event, context):
+    today = dt.datetime.now(dt.timezone.utc).date()
+    ingest_range(today, today)
 
 
 if __name__ == "__main__":
