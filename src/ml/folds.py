@@ -10,7 +10,7 @@ from dateutil.relativedelta import relativedelta
 from typing import Iterator, NamedTuple
 
 HOLDOUT_START = dt.date(2025, 7, 1)
-HOLDOUT_END = dt.date(2026, 7, 11)
+HOLDOUT_END = dt.date(2026, 9, 1)
 MAX_LEAD = 7
 
 
