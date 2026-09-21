@@ -23,7 +23,7 @@ resource "aws_lambda_permission" "weather_ingest" {
 resource "aws_cloudwatch_event_rule" "demand_ingest" {
   name                = "demand_ingest_event"
   description         = "Invoke lambda for demand ingestion from API"
-  schedule_expression = "cron(0 7 * * ? *)"
+  schedule_expression = "cron(0 * * * ? *)"
 }
 
 resource "aws_cloudwatch_event_target" "demand_ingest" {
