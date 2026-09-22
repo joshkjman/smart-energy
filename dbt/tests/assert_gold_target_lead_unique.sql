@@ -2,6 +2,6 @@ select
     target_ts,
     lead_days,
     count(*)
-from {{ ref('fct_demand_features') }}
+from {{ ref('int_demand_feature_rows') }}
 group by target_ts, lead_days
 having count(*) > 1

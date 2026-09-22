@@ -4,5 +4,6 @@
 
 select *
 from {{ ref('int_demand_feature_rows') }}
-where demand_mw is not null
+where issue_ts = cast(current_date as timestamp)
+and cutoff <= current_timestamp
 and demand_lag_mw is not null
