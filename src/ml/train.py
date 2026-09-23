@@ -76,17 +76,11 @@ PARAMS = {
 BAGGED = {**PARAMS, 'subsample': 0.8, 'subsample_freq': 1, 'colsample_bytree': 0.8}
 
 
-def run_fold(train_df, test_df, features: list[str], params) -> pd.DataFrame:
-    """Fit on train_df, predict test_df.
-
-    Returns test_df's identifying columns plus a prediction column, so the
-    caller can concatenate folds and score once at the end.
-    """
-    model = lgb.LGBMRegressor(**params)
-    model.fit(train_df[features], train_df[TARGET])
-    test_df['demand_prediction'] = model.predict(test_df[features])
-
-    return test_df[['lead_days', 'demand_mw', 'target_ts', 'demand_prediction', 'baseline_prediction', 'is_holiday', 'temperature_2m', 'hour', 'day']]
+def fit_model(df, features: list[str], params) -> lgb.booster:
+    """Fit one LightGBM on df. The only place a model is ever fitted."""
+    model = lgb.Booster(**params)
+    model.fit(df[features], df[TARGET])
+    return model
 
 
 def walk_forward(df, features: list[str], params) -> pd.DataFrame:
@@ -106,7 +100,9 @@ def walk_forward(df, features: list[str], params) -> pd.DataFrame:
         assert not test_df.empty
         assert train_df['target_ts'].max() < test_df['target_ts'].min()
 
-        predictions = run_fold(train_df, test_df, features, params)
+        model = fit_model(train_df, features, params)
+        test_df['demand_prediction'] = model.predict(test_df[features])
+        predictions = test_df[['lead_days', 'demand_mw', 'target_ts', 'demand_prediction', 'baseline_prediction', 'is_holiday', 'temperature_2m', 'hour', 'day']]
         results.append(predictions)
 
     return pd.concat(results, ignore_index=True)
