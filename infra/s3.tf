@@ -99,4 +99,25 @@ resource "aws_s3_bucket_lifecycle_configuration" "smart_energy_bucket_lifecycle"
 
     status = "Enabled"
   }
+
+  rule {
+    id = "expire-versions-lambda-layer"
+
+    filter {
+      prefix = "lambda-layers/"
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 7
+    }
+
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_object" "inference_layer" {
+  bucket = aws_s3_bucket.smart_energy_bucket.bucket
+  key    = "lambda-layers/inference_layer.zip"
+  source = data.archive_file.inference_layer_zip.output_path
+  etag   = data.archive_file.inference_layer_zip.output_md5
 }

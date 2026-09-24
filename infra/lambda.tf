@@ -1,12 +1,3 @@
-locals {
-  weather_ingest_function_name = "weather_ingest_lambda"
-}
-
-resource "aws_cloudwatch_log_group" "weather_ingest" {
-  name              = "/aws/lambda/${local.weather_ingest_function_name}"
-  retention_in_days = 14
-}
-
 data "archive_file" "layer_zip" {
   type        = "zip"
   source_dir  = "${path.module}/../build/layer"
@@ -18,13 +9,6 @@ data "archive_file" "layer_zip" {
   ]
 }
 
-data "archive_file" "code_zip" {
-  type        = "zip"
-  source_dir  = "${path.module}/../src"
-  output_path = "${path.module}/../build/code.zip"
-  excludes    = ["ml/**", "**/__pycache__/**"]
-}
-
 resource "aws_lambda_layer_version" "ingest_lambda_layer" {
   filename   = data.archive_file.layer_zip.output_path
   layer_name = "ingest_lambda_layer"
@@ -32,6 +16,43 @@ resource "aws_lambda_layer_version" "ingest_lambda_layer" {
   source_code_hash         = data.archive_file.layer_zip.output_base64sha256
   compatible_runtimes      = ["python3.12"]
   compatible_architectures = ["x86_64"]
+}
+
+data "archive_file" "inference_layer_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/../build/inference_layer"
+  output_path = "${path.module}/../build/inference_layer.zip"
+  excludes = [
+    "**/__pycache__/**",
+    "**/tests/**",
+    "python/bin/**",
+  ]
+}
+
+resource "aws_lambda_layer_version" "inference_lambda_layer" {
+  s3_bucket  = aws_s3_object.inference_layer.bucket
+  s3_key     = aws_s3_object.inference_layer.key
+  layer_name = "inference_lambda_layer"
+
+  source_code_hash         = data.archive_file.inference_layer_zip.output_base64sha256
+  compatible_runtimes      = ["python3.12"]
+  compatible_architectures = ["x86_64"]
+}
+
+data "archive_file" "code_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/../src"
+  output_path = "${path.module}/../build/code.zip"
+  excludes    = ["ml/**", "**/__pycache__/**"]
+}
+
+locals {
+  weather_ingest_function_name = "weather_ingest_lambda"
+}
+
+resource "aws_cloudwatch_log_group" "weather_ingest" {
+  name              = "/aws/lambda/${local.weather_ingest_function_name}"
+  retention_in_days = 14
 }
 
 resource "aws_lambda_function" "weather_ingest_lambda_function" {
@@ -89,4 +110,15 @@ resource "aws_lambda_function" "demand_ingest_lambda_function" {
       BRONZE_BUCKET = aws_s3_bucket.smart_energy_bucket.bucket
     }
   }
+}
+
+
+
+locals {
+  inference_lambda_function_name = "inference_lambda"
+}
+
+resource "aws_cloudwatch_log_group" "inference_lambda" {
+  name              = "/aws/lambda/${local.inference_lambda_function_name}"
+  retention_in_days = 14
 }

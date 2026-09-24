@@ -1,0 +1,3 @@
+-r requirements-base.txt
+lightgbm==4.7.0
+pyathena==3.34.0
