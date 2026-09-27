@@ -123,6 +123,107 @@ data "aws_iam_policy_document" "inference_lambda_permissions" {
   }
 }
 
+data "aws_iam_policy_document" "dbt_lambda_permissions" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "athena:StartQueryExecution",
+      "athena:GetQueryResults",
+      "athena:GetQueryExecution"
+    ]
+    resources = ["arn:aws:athena:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:workgroup/foresight_queries"]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "glue:GetDatabase",
+      "glue:GetTable",
+      "glue:GetPartitions",
+      "glue:CreateTable",
+      "glue:UpdateTable",
+      "glue:DeleteTable"
+    ]
+    resources = [
+      "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:catalog",
+      "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:database/gold",
+      "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:table/gold/*",
+      "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:database/silver",
+      "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:table/silver/*",
+    ]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "glue:GetDatabase",
+      "glue:GetTable",
+      "glue:GetPartitions"
+    ]
+    resources = [
+      "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:database/bronze",
+      "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:table/bronze/*",
+    ]
+  }
+
+  statement {
+    effect  = "Allow"
+    actions = ["s3:GetObject"]
+    resources = [
+      "${aws_s3_bucket.smart_energy_bucket.arn}/bronze/*",
+      "${aws_s3_bucket.smart_energy_bucket.arn}/silver/*"
+    ]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = ["${aws_s3_bucket.smart_energy_bucket.arn}"]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["bronze/*", "silver/*", "gold/*", "athena-results/*"]
+    }
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject"
+    ]
+    resources = [
+      "${aws_s3_bucket.smart_energy_bucket.arn}/athena-results/*"
+    ]
+  }
+
+  statement {
+    effect  = "Allow"
+    actions = [
+      "s3:PutObject",
+      "s3:DeleteObject"
+    ]
+    resources = [
+      "${aws_s3_bucket.smart_energy_bucket.arn}/silver/*",
+      "${aws_s3_bucket.smart_energy_bucket.arn}/gold/*"
+    ]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    resources = [
+      "${aws_cloudwatch_log_group.dbt_lambda.arn}:*",
+    ]
+  }
+}
+
+
+
 resource "aws_iam_role" "weather_ingest" {
   name               = "${local.weather_ingest_function_name}-role"
   assume_role_policy = data.aws_iam_policy_document.lambda_trust.json
@@ -135,6 +236,11 @@ resource "aws_iam_role" "demand_ingest" {
 
 resource "aws_iam_role" "inference_lambda" {
   name               = "${local.inference_lambda_function_name}-role"
+  assume_role_policy = data.aws_iam_policy_document.lambda_trust.json
+}
+
+resource "aws_iam_role" "dbt_lambda" {
+  name               = "${local.dbt_lambda_function_name}-role"
   assume_role_policy = data.aws_iam_policy_document.lambda_trust.json
 }
 
@@ -154,4 +260,10 @@ resource "aws_iam_role_policy" "inference_lambda" {
   name   = "inference_lambda_policy"
   role   = aws_iam_role.inference_lambda.id
   policy = data.aws_iam_policy_document.inference_lambda_permissions.json
+}
+
+resource "aws_iam_role_policy" "dbt_lambda" {
+  name   = "dbt_lambda_policy"
+  role   = aws_iam_role.dbt_lambda.id
+  policy = data.aws_iam_policy_document.dbt_lambda_permissions.json
 }
