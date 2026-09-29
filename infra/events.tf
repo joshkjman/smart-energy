@@ -39,3 +39,18 @@ resource "aws_lambda_permission" "demand_ingest" {
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.demand_ingest.arn
 }
+
+
+
+resource "aws_cloudwatch_event_rule" "dbt_build" {
+  name                = "dbt_build_event"
+  description         = "Run dbt build after the day's weather forecast has landed"
+  schedule_expression = "cron(30 5 * * ? *)"
+}
+
+resource "aws_cloudwatch_event_target" "dbt_build" {
+  rule      = aws_cloudwatch_event_rule.dbt_build.name
+  target_id = "dbt_build_codebuild"
+  arn       = aws_codebuild_project.dbt.arn
+  role_arn  = aws_iam_role.events_dbt_build.arn
+}

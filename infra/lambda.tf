@@ -39,24 +39,20 @@ resource "aws_lambda_layer_version" "inference_lambda_layer" {
   compatible_architectures = ["x86_64"]
 }
 
-data "archive_file" "dbt_layer_zip" {
+data "archive_file" "build_source_zip" {
   type        = "zip"
-  source_dir  = "${path.module}/../build/dbt_layer"
-  output_path = "${path.module}/../build/dbt_layer.zip"
+  source_dir  = "${path.module}/.."
+  output_path = "${path.module}/../build/build_source.zip"
   excludes = [
-    "**/__pycache__/**",
-    "target/**",
-    "logs/**"
+    ".venv/**",
+    "build/**",
+    "data/**",
+    ".git/**",
+    "infra/.terraform/**",
+    "dbt/target/**",
+    "dbt/logs/**",
+    "**/__pycache__/**"
   ]
-}
-
-resource "aws_lambda_layer_version" "dbt_lambda_layer" {
-  filename   = data.archive_file.dbt_layer_zip.output_path
-  layer_name = "dbt_lambda_layer"
-
-  source_code_hash         = data.archive_file.dbt_layer_zip.output_base64sha256
-  compatible_runtimes      = ["python3.12"]
-  compatible_architectures = ["x86_64"]
 }
 
 data "archive_file" "code_zip" {
@@ -64,17 +60,6 @@ data "archive_file" "code_zip" {
   source_dir  = "${path.module}/../src"
   output_path = "${path.module}/../build/code.zip"
   excludes    = ["ml/**", "**/__pycache__/**"]
-}
-
-data "archive_file" "dbt_code_zip" {
-  type        = "zip"
-  source_dir  = "${path.module}/../dbt"
-  output_path = "${path.module}/../build/dbt_code.zip"
-  excludes = [
-    "**/__pycache__/**",
-    "target/**",
-    "logs/**"
-  ]
 }
 
 locals {
@@ -152,39 +137,4 @@ locals {
 resource "aws_cloudwatch_log_group" "inference_lambda" {
   name              = "/aws/lambda/${local.inference_lambda_function_name}"
   retention_in_days = 14
-}
-
-
-
-locals {
-  dbt_lambda_function_name = "dbt_lambda"
-}
-
-resource "aws_cloudwatch_log_group" "dbt_lambda" {
-  name              = "/aws/lambda/${local.dbt_lambda_function_name}"
-  retention_in_days = 14
-}
-
-resource "aws_lambda_function" "dbt_lambda_function" {
-  filename      = data.archive_file.dbt_code_zip.output_path
-  function_name = local.dbt_lambda_function_name
-  role          = aws_iam_role.dbt_lambda.arn
-  handler       = "lambda_handler.handler"
-  runtime       = "python3.12"
-
-  architectures = ["x86_64"]
-
-  layers = [aws_lambda_layer_version.dbt_lambda_layer.arn]
-
-  timeout          = 300
-  memory_size      = 1024
-  depends_on       = [aws_cloudwatch_log_group.dbt_lambda]
-  source_code_hash = data.archive_file.dbt_code_zip.output_base64sha256
-
-  environment {
-    variables = {
-      DBT_TARGET_PATH = "/tmp/target"
-      DBT_LOG_PATH    = "/tmp/logs"
-    }
-  }
 }

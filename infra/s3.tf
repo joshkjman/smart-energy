@@ -121,3 +121,10 @@ resource "aws_s3_object" "inference_layer" {
   source = data.archive_file.inference_layer_zip.output_path
   etag   = data.archive_file.inference_layer_zip.output_md5
 }
+
+resource "aws_s3_object" "build_source_layer" {
+  bucket = aws_s3_bucket.smart_energy_bucket.bucket
+  key    = "build-source/source.zip"
+  source = data.archive_file.build_source_zip.output_path
+  etag   = data.archive_file.build_source_zip.output_md5
+}
