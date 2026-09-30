@@ -45,8 +45,9 @@ resource "aws_lambda_permission" "demand_ingest" {
 resource "aws_cloudwatch_event_rule" "dbt_build" {
   name                = "dbt_build_event"
   description         = "Run dbt build after the day's weather forecast has landed"
-  schedule_expression = "cron(30 5 * * ? *)"
+  schedule_expression = "cron(15 22 * * ? *)"
 }
+# late enough that demand through 20:00 is ingested (23 of 24 target hours servable), early enough that a slow run can't cross midnight and lose issue_ts = current_date
 
 resource "aws_cloudwatch_event_target" "dbt_build" {
   rule      = aws_cloudwatch_event_rule.dbt_build.name

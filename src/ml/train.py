@@ -34,11 +34,11 @@ FEATURES = [
 ]
 WEATHER_FEATURES = ['temperature_2m', 'heating_degrees', 'cooling_degrees', 'shortwave_radiation']
 NON_WEATHER_FEATURES = [f for f in FEATURES if f not in WEATHER_FEATURES]
-TARGET = "demand_mw"
-CATEGORICAL = [
+CATEGORICAL_FEATURES = [
     'hour',
     'day', 
 ]
+TARGET = "demand_mw"
 
 
 def load_features(con) -> pd.DataFrame:
@@ -49,8 +49,10 @@ def load_features(con) -> pd.DataFrame:
             from gold.fct_demand_features 
             """
         ).as_pandas()
-    df['hour'] = df['hour'].astype('category')
-    df['day'] = df['day'].astype('category')
+    
+    for category in CATEGORICAL_FEATURES:
+        df[category] = df[category].astype('category')
+
     return df
 
 
@@ -76,9 +78,9 @@ PARAMS = {
 BAGGED = {**PARAMS, 'subsample': 0.8, 'subsample_freq': 1, 'colsample_bytree': 0.8}
 
 
-def fit_model(df, features: list[str], params) -> lgb.booster:
+def fit_model(df, features: list[str], params) -> lgb.LGBMRegressor:
     """Fit one LightGBM on df. The only place a model is ever fitted."""
-    model = lgb.Booster(**params)
+    model = lgb.LGBMRegressor(**params)
     model.fit(df[features], df[TARGET])
     return model
 

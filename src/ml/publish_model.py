@@ -3,7 +3,7 @@ import boto3
 import os
 import lightgbm as lgb
 from athena import get_athena_connection
-from train import load_features, fit_model, FEATURES, PARAMS
+from train import load_features, fit_model, FEATURES, PARAMS, CATEGORICAL_FEATURES
 
 BUCKET_NAME = os.environ['BRONZE_BUCKET']
 MODEL_PREFIX = "models/demand_lgbm"
@@ -20,7 +20,8 @@ def publish(regressor, df, version: str) -> None:
         "row count": df.shape[0],
         "max(target_ts)": df['target_ts'].max().isoformat(),
         "lightgbm version": lgb.__version__,
-        "timestamp": dt.datetime.now(dt.timezone.utc).isoformat()
+        "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "categorical_features": CATEGORICAL_FEATURES
     }
     metadata_body = json.dumps(metadata)
 
