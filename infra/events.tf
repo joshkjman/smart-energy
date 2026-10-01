@@ -55,3 +55,27 @@ resource "aws_cloudwatch_event_target" "dbt_build" {
   arn       = aws_codebuild_project.dbt.arn
   role_arn  = aws_iam_role.events_dbt_build.arn
 }
+
+
+
+resource "aws_cloudwatch_event_rule" "inference_lambda" {
+  name                = "inference_lambda_event"
+  description         = "Invoke lambda for inference predictions"
+  schedule_expression = "cron(45 22 * * ? *)"
+}
+# 30 minutes after the dbt build, so the mart's demand lags are fresh.
+# Both are late enough for a 23-hour horizon and early enough not to cross midnight.
+
+resource "aws_cloudwatch_event_target" "inference_lambda" {
+  rule      = aws_cloudwatch_event_rule.inference_lambda.name
+  target_id = "inference_lambda_event_target"
+  arn       = aws_lambda_function.inference_lambda_function.arn
+}
+
+resource "aws_lambda_permission" "inference_lambda" {
+  statement_id  = "AllowExecutionFromEvents"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.inference_lambda_function.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.inference_lambda.arn
+}

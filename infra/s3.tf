@@ -116,10 +116,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "smart_energy_bucket_lifecycle"
 }
 
 resource "aws_s3_object" "inference_layer" {
-  bucket = aws_s3_bucket.smart_energy_bucket.bucket
-  key    = "lambda-layers/inference_layer.zip"
-  source = data.archive_file.inference_layer_zip.output_path
-  etag   = data.archive_file.inference_layer_zip.output_md5
+  bucket      = aws_s3_bucket.smart_energy_bucket.bucket
+  key         = "lambda-layers/inference_layer.zip"
+  source      = data.archive_file.inference_layer_zip.output_path
+  source_hash = data.archive_file.inference_layer_zip.output_md5
 }
 
 resource "aws_s3_object" "build_source_layer" {

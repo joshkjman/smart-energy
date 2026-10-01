@@ -138,3 +138,25 @@ resource "aws_cloudwatch_log_group" "inference_lambda" {
   name              = "/aws/lambda/${local.inference_lambda_function_name}"
   retention_in_days = 14
 }
+
+resource "aws_lambda_function" "inference_lambda_function" {
+  filename      = data.archive_file.code_zip.output_path
+  function_name = local.inference_lambda_function_name
+  role          = aws_iam_role.inference_lambda.arn
+  handler       = "inference.predict.handler"
+  runtime       = "python3.12"
+  architectures = ["x86_64"]
+
+  layers = [aws_lambda_layer_version.inference_lambda_layer.arn]
+
+  timeout          = 120
+  memory_size      = 1024
+  depends_on       = [aws_cloudwatch_log_group.inference_lambda]
+  source_code_hash = data.archive_file.code_zip.output_base64sha256
+
+  environment {
+    variables = {
+      BRONZE_BUCKET = aws_s3_bucket.smart_energy_bucket.bucket
+    }
+  }
+}
