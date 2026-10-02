@@ -135,7 +135,7 @@ data "aws_iam_policy_document" "inference_lambda_permissions" {
     effect  = "Allow"
     actions = ["s3:PutObject"]
     resources = [
-    "${aws_s3_bucket.smart_energy_bucket.arn}/gold/forecasts/*"]
+    "${aws_s3_bucket.smart_energy_bucket.arn}/bronze/inference_forecasts/*"]
   }
 
   statement {

@@ -13,7 +13,7 @@ from pyathena.pandas.cursor import PandasCursor
 
 BUCKET          = os.environ['BRONZE_BUCKET']
 MODEL_PREFIX    = "models/demand_lgbm"
-FORECAST_PREFIX = "gold/forecasts"
+FORECAST_PREFIX = "bronze/inference_forecasts"
 WORK_GROUP      = "foresight_queries" 
 REGION          = "eu-west-2"
 

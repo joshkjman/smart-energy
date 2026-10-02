@@ -113,6 +113,45 @@ resource "aws_glue_catalog_table" "bank_holidays" {
 }
 
 
+resource "aws_glue_catalog_table" "inference_forecasts" {
+  name          = "inference_forecasts"
+  database_name = aws_glue_catalog_database.bronze.name
+  table_type    = "EXTERNAL_TABLE"
+
+  parameters = {
+    "classification"                      = "json"
+    "projection.enabled"                  = "true"
+    "projection.issue_date.type"          = "date"
+    "projection.issue_date.format"        = "yyyy-MM-dd"
+    "projection.issue_date.range"         = "2026-09-30,NOW"
+    "projection.issue_date.interval"      = "1"
+    "projection.issue_date.interval.unit" = "DAYS"
+    "storage.location.template"           = "s3://${aws_s3_bucket.smart_energy_bucket.bucket}/bronze/inference_forecasts/issue_date=$${issue_date}"
+  }
+
+  partition_keys {
+    name = "issue_date"
+    type = "string"
+  }
+
+  storage_descriptor {
+    location      = "s3://${aws_s3_bucket.smart_energy_bucket.bucket}/bronze/inference_forecasts/"
+    input_format  = "org.apache.hadoop.mapred.TextInputFormat"
+    output_format = "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
+
+    ser_de_info {
+      serialization_library = "org.openx.data.jsonserde.JsonSerDe"
+    }
+
+    columns {
+      name = "data"
+      type = "array<struct<target_ts:string,issue_ts:string,lead_days:int,predicted_mw:double,model_version:string>>"
+    }
+  }
+}
+
+
+
 resource "aws_glue_catalog_database" "bronze" {
   name = "bronze"
 }
