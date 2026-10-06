@@ -32,6 +32,17 @@ data "aws_iam_policy_document" "codebuild_trust" {
   }
 }
 
+data "aws_iam_policy_document" "step_function_trust" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["states.amazonaws.com"]
+    }
+  }
+}
+
 
 
 data "aws_iam_policy_document" "weather_ingestion_permissions" {
@@ -275,11 +286,50 @@ data "aws_iam_policy_document" "dbt_build_permissions" {
   }
 }
 
-data "aws_iam_policy_document" "events_start_build" {
+data "aws_iam_policy_document" "events_start_state" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "states:StartExecution"
+    ]
+    resources = [
+      "${aws_sfn_state_machine.nightly.arn}"
+    ]
+  }
+}
+
+data "aws_iam_policy_document" "sfn_state_machine_permissions" {
   statement {
     effect    = "Allow"
-    actions   = ["codebuild:StartBuild"]
-    resources = [aws_codebuild_project.dbt.arn]
+    actions   = ["lambda:InvokeFunction"]
+    resources = [
+      "${aws_lambda_function.demand_ingest_lambda_function.arn}",
+      "${aws_lambda_function.inference_lambda_function.arn}"
+    ]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "codebuild:StartBuild",
+      "codebuild:StopBuild",
+      "codebuild:BatchGetBuilds"
+    ]
+    resources = [
+      "${aws_codebuild_project.dbt.arn}",
+    ]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "events:PutTargets", 
+      "events:PutRule", 
+      "events:DescribeRule"
+    ]
+    resources = [
+      "arn:aws:events:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:rule/StepFunctionsGetEventForCodeBuildStartBuildRule",
+    ]
   }
 }
 
@@ -305,9 +355,14 @@ resource "aws_iam_role" "dbt_build" {
   assume_role_policy = data.aws_iam_policy_document.codebuild_trust.json
 }
 
-resource "aws_iam_role" "events_dbt_build" {
-  name               = "events-dbt-build-role"
+resource "aws_iam_role" "events_state_machine" {
+  name               = "events-state-machine-role"
   assume_role_policy = data.aws_iam_policy_document.events_trust.json
+}
+
+resource "aws_iam_role" "sfn_state_machine_role" {
+  name               = "sfn-state-machine-role"
+  assume_role_policy = data.aws_iam_policy_document.step_function_trust.json
 }
 
 
@@ -336,8 +391,14 @@ resource "aws_iam_role_policy" "dbt_build" {
   policy = data.aws_iam_policy_document.dbt_build_permissions.json
 }
 
-resource "aws_iam_role_policy" "events_dbt_build" {
-  name   = "events_dbt_build_policy"
-  role   = aws_iam_role.events_dbt_build.id
-  policy = data.aws_iam_policy_document.events_start_build.json
+resource "aws_iam_role_policy" "events_start_state" {
+  name   = "events_start_state_policy"
+  role   = aws_iam_role.events_state_machine.id
+  policy = data.aws_iam_policy_document.events_start_state.json
+}
+
+resource "aws_iam_role_policy" "sfn_state_machine" {
+  name   = "sfn_state_machine_policy"
+  role   = aws_iam_role.sfn_state_machine_role.id
+  policy = data.aws_iam_policy_document.sfn_state_machine_permissions.json
 }
