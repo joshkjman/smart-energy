@@ -52,5 +52,5 @@ resource "aws_cloudwatch_event_target" "sfn_state_machine" {
   rule      = aws_cloudwatch_event_rule.sfn_state_machine.name
   target_id = "sfn_state_machine"
   arn       = aws_sfn_state_machine.nightly.arn
-  role_arn  = aws_iam_role.events_start_state.arn
+  role_arn  = aws_iam_role.events_state_machine.arn
 }
