@@ -13,6 +13,17 @@ resource "aws_sfn_state_machine" "nightly" {
         FunctionName: aws_lambda_function.demand_ingest_lambda_function.arn
         "Payload": {} 
       }
+      "Retry": [{
+        "ErrorEquals": [
+          "Lambda.ServiceException",
+          "Lambda.AWSLambdaException",
+          "Lambda.SdkClientException",
+          "Lambda.TooManyRequestsException",
+          "States.Timeout"
+        ],
+        "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0
+      }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "Next": "NotifyFailure", "ResultPath": "$.error.DemandIngest" }],
       Next: "SourceFreshness"
     },
     SourceFreshness: {
@@ -35,6 +46,7 @@ resource "aws_sfn_state_machine" "nightly" {
                   - dbt source freshness --profiles-dir .
           SPEC
       }
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "Next": "NotifyFailure", "ResultPath": "$.error.SourceFreshness" }],
       Next: "DbtBuild"
     },
     DbtBuild:   {
@@ -42,7 +54,12 @@ resource "aws_sfn_state_machine" "nightly" {
       Resource: "arn:aws:states:::codebuild:startBuild.sync"
       Parameters: {
         ProjectName: aws_codebuild_project.dbt.name
-      },
+      }
+      "Retry": [{
+        "ErrorEquals": ["States.TaskFailed"],
+        "IntervalSeconds": 30, "MaxAttempts": 1, "BackoffRate": 2.0
+      }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "Next": "NotifyFailure", "ResultPath": "$.error.DbtBuild" }],
       Next: "Inference"
     },
     "Inference":  { 
@@ -52,8 +69,30 @@ resource "aws_sfn_state_machine" "nightly" {
         FunctionName: aws_lambda_function.inference_lambda_function.arn
         Payload: {} 
       }
+      "Retry": [{
+        "ErrorEquals": [
+          "Lambda.ServiceException",
+          "Lambda.AWSLambdaException",
+          "Lambda.SdkClientException",
+          "Lambda.TooManyRequestsException",
+          "States.Timeout"
+        ],
+        "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0
+      }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "Next": "NotifyFailure", "ResultPath": "$.error.Inference" }],
       End: true
-    }
+    },
+    "NotifyFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": aws_sns_topic.alerts.arn,
+        "Subject": "Foresight nightly chain failed",
+        "Message.$": "States.JsonToString($.error)"
+      },
+      "Next": "ChainFailed"
+    },
+    "ChainFailed": { "Type": "Fail", "Error": "NightlyChainFailed" }
   }
 })
 }

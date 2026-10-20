@@ -331,6 +331,12 @@ data "aws_iam_policy_document" "sfn_state_machine_permissions" {
       "arn:aws:events:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:rule/StepFunctionsGetEventForCodeBuildStartBuildRule",
     ]
   }
+
+  statement {
+    effect = "Allow"
+    actions = ["sns:Publish"]
+    resources = [aws_sns_topic.alerts.arn]
+  }
 }
 
 
