@@ -4,15 +4,12 @@ import pandas as pd
 
 from datetime import timedelta
 from ingestion.bronze_io import write_bronze
+from common.openmeteo import LAT, LON, HOURLY_VARS, hourly_to_frame
 
 
 PREV_RUNS_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 BRONZE_PREFIX = "bronze/weather_forecast"
 
-LAT = 51.5085
-LON = -0.1257
-
-HOURLY_VARS = ["temperature_2m", "shortwave_radiation"]
 MAX_PREVIOUS_DAY = 7
 
 BACKFILL_START = dt.date(2026,7,11)
@@ -33,21 +30,8 @@ def fetch_previous_runs(start_date: dt.date, end_date: dt.date) -> pd.DataFrame:
     }
     prev_model_responses = openmeteo.weather_api(PREV_RUNS_URL, params = prev_model_params)
     prev_model_response = prev_model_responses[0]
-
-    prev_model_hourly = prev_model_response.Hourly()
-    prev_model_hourly_data = {
-        "date": pd.date_range(
-            start = pd.to_datetime(prev_model_hourly.Time(), unit = "s", utc = True),
-            end =  pd.to_datetime(prev_model_hourly.TimeEnd(), unit = "s", utc = True),
-            freq = pd.Timedelta(seconds = prev_model_hourly.Interval()),
-            inclusive = "left"
-        )
-    }
     
-    for i, name in enumerate(prev_model_params['hourly']):
-        prev_model_hourly_data[name] = prev_model_hourly.Variables(i).ValuesAsNumpy()
-
-    prev_model_hourly_data_df = pd.DataFrame(data = prev_model_hourly_data)
+    prev_model_hourly_data_df = hourly_to_frame(prev_model_response, prev_model_params['hourly'])
 
     return prev_model_hourly_data_df
 
