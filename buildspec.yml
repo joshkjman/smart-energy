@@ -9,4 +9,10 @@ phases:
     commands:
       - cd dbt
       - dbt deps
+      # Leakage guard: weather ACTUALS must never be upstream of a feature model.
+      # Asserts on the dbt DAG, not on column names, so it survives renames and
+      # catches laundering through any number of intermediate models.
+      - dbt ls --quiet --select +fct_demand_features --resource-type model --profiles-dir . > lineage.txt
+      - if ! test -s lineage.txt; then echo "GUARD BROKEN - empty lineage for fct_demand_features"; exit 1; fi
+      - if grep -q stg_weather_actual lineage.txt; then echo "LEAKAGE - weather actuals are upstream of fct_demand_features"; exit 1; fi
       - dbt build --profiles-dir .

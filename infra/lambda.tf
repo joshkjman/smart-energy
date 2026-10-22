@@ -160,3 +160,35 @@ resource "aws_lambda_function" "inference_lambda_function" {
     }
   }
 }
+
+locals {
+  weather_actual_function_name = "weather_actual_lambda"
+}
+
+resource "aws_cloudwatch_log_group" "weather_actual" {
+  name              = "/aws/lambda/${local.weather_actual_function_name}"
+  retention_in_days = 14
+}
+
+resource "aws_lambda_function" "weather_actual_lambda_function" {
+  filename      = data.archive_file.code_zip.output_path
+  function_name = local.weather_actual_function_name
+  role          = aws_iam_role.weather_actual.arn
+  handler       = "ingestion.weather_actual_ingest.handler"
+  runtime       = "python3.12"
+
+  architectures = ["x86_64"]
+
+  layers = [aws_lambda_layer_version.ingest_lambda_layer.arn]
+
+  timeout          = 60
+  memory_size      = 512
+  depends_on       = [aws_cloudwatch_log_group.weather_actual]
+  source_code_hash = data.archive_file.code_zip.output_base64sha256
+
+  environment {
+    variables = {
+      BRONZE_BUCKET = aws_s3_bucket.smart_energy_bucket.bucket
+    }
+  }
+}

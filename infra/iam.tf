@@ -408,3 +408,32 @@ resource "aws_iam_role_policy" "sfn_state_machine" {
   role   = aws_iam_role.sfn_state_machine_role.id
   policy = data.aws_iam_policy_document.sfn_state_machine_permissions.json
 }
+data "aws_iam_policy_document" "weather_actual_permissions" {
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.smart_energy_bucket.arn}/bronze/weather_actual/*"]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    resources = [
+      "${aws_cloudwatch_log_group.weather_actual.arn}:*",
+    ]
+  }
+}
+
+resource "aws_iam_role" "weather_actual" {
+  name               = "${local.weather_actual_function_name}-role"
+  assume_role_policy = data.aws_iam_policy_document.lambda_trust.json
+}
+
+resource "aws_iam_role_policy" "weather_actual" {
+  name   = "weather_actual_policy"
+  role   = aws_iam_role.weather_actual.id
+  policy = data.aws_iam_policy_document.weather_actual_permissions.json
+}

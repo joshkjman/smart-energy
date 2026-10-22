@@ -10,3 +10,4 @@ dbt/.user.yml
 dbt_packages/
 build/
 terraform.tfvars
+lineage.txt

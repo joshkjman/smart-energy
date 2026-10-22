@@ -163,3 +163,41 @@ resource "aws_glue_catalog_database" "silver" {
 resource "aws_glue_catalog_database" "gold" {
   name = "gold"
 }
+
+
+resource "aws_glue_catalog_table" "weather_actual" {
+  name          = "weather_actual"
+  database_name = aws_glue_catalog_database.bronze.name
+  table_type    = "EXTERNAL_TABLE"
+
+  parameters = {
+    "classification"                       = "json"
+    "projection.enabled"                   = "true"
+    "projection.target_date.type"          = "date"
+    "projection.target_date.format"        = "yyyy-MM-dd"
+    "projection.target_date.range"         = "2026-07-11,NOW"
+    "projection.target_date.interval"      = "1"
+    "projection.target_date.interval.unit" = "DAYS"
+    "storage.location.template"            = "s3://${aws_s3_bucket.smart_energy_bucket.bucket}/bronze/weather_actual/target_date=$${target_date}"
+  }
+
+  partition_keys {
+    name = "target_date"
+    type = "string"
+  }
+
+  storage_descriptor {
+    location      = "s3://${aws_s3_bucket.smart_energy_bucket.bucket}/bronze/weather_actual/"
+    input_format  = "org.apache.hadoop.mapred.TextInputFormat"
+    output_format = "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
+
+    ser_de_info {
+      serialization_library = "org.openx.data.jsonserde.JsonSerDe"
+    }
+
+    columns {
+      name = "data"
+      type = "array<struct<target_ts:string,variable:string,value:double>>"
+    }
+  }
+}

@@ -54,3 +54,22 @@ resource "aws_cloudwatch_event_target" "sfn_state_machine" {
   arn       = aws_sfn_state_machine.nightly.arn
   role_arn  = aws_iam_role.events_state_machine.arn
 }
+resource "aws_cloudwatch_event_rule" "weather_actual" {
+  name                = "weather_actual_event"
+  description         = "Invoke lambda for weather actuals (reanalysis) ingestion from archive API"
+  schedule_expression = "cron(0 4 * * ? *)"
+}
+
+resource "aws_cloudwatch_event_target" "weather_actual" {
+  rule      = aws_cloudwatch_event_rule.weather_actual.name
+  target_id = "weather_actual_event_target"
+  arn       = aws_lambda_function.weather_actual_lambda_function.arn
+}
+
+resource "aws_lambda_permission" "weather_actual" {
+  statement_id  = "AllowExecutionFromEvents"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.weather_actual_lambda_function.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.weather_actual.arn
+}
