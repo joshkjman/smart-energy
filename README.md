@@ -214,6 +214,24 @@ The honest reading is that embedded solar is a **confirmed contributor, not the 
 
 ---
 
+### Where the live under-forecast comes from
+
+Live forecasts run low, and the bias grows with lead. Holding the target hours fixed so the rising autumn trend can't confound it, the same hour predicted seven days out comes in 444 MW below the same hour predicted same-day:
+
+| lead | mean predicted | mean actual | bias |
+|---|---|---|---|
+| 0 | 24,899 MW | 25,253 MW | +354 MW |
+| 7 | 24,455 MW | 25,253 MW | +798 MW |
+
+That splits into a flat component present even at lead 0, and a component that scales with lead. Weather actuals (ECMWF IFS reanalysis, ingested specifically to answer this) separate them. Forecast temperature error is **flat in sign** across horizons — a constant +0.47 °C warm bias at every lead — while its *magnitude* grows cleanly from 0.83 °C MAE at lead 0 to 2.19 °C at lead 7, over 2,520 rows per lead.
+
+A directionless error cannot produce a directional bias, so the growing MAE is ruled out as the cause even though it is real. The 444 MW belongs to the demand lag feature: `cutoff` sits further in the past at longer leads, so in a rising series the anchor is further below the truth, and the under-forecast scales with staleness.
+
+The flat 354 MW is consistent with a mixture of the warm forecast bias and the model never having trained on late-October demand levels — but that split is **not identifiable** from 3½ months spanning one seasonal transition. Every cold day is also a late day (mean day-of-year 286 against 238 for warm days), so temperature proxies for season: within-regime regression gives ~200 MW/°C, the between-regime difference ~640 MW/°C, and closing the attribution would need ~750. A full year, with cold days falling in different parts of the calendar, would resolve it.
+
+None of this is leakage. A model using future information gets *better* at long leads, because that information is worth more the further ahead it reaches. This one gets monotonically worse, with a bias that scales with staleness — the signature of a model that genuinely only sees the past. Weather actuals are kept out of the feature path by a CI assertion on the dbt DAG rather than a naming convention, so the claim is checkable: `dbt ls --select +fct_demand_features` must not contain `stg_weather_actual`.
+
+
 ## Relevance to Octopus Energy
 
 Demand (and price) forecasting underpins grid balancing, tariff-setting, and flexibility products. Better short-term forecasts mean less spinning reserve held in readiness, which cuts both cost and carbon. This is a simplified, public-data version of a problem an energy data team works on directly.
