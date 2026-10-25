@@ -175,7 +175,7 @@ resource "aws_glue_catalog_table" "weather_actual" {
     "projection.enabled"                   = "true"
     "projection.target_date.type"          = "date"
     "projection.target_date.format"        = "yyyy-MM-dd"
-    "projection.target_date.range"         = "2026-07-11,NOW"
+    "projection.target_date.range"         = "2024-06-24,NOW"
     "projection.target_date.interval"      = "1"
     "projection.target_date.interval.unit" = "DAYS"
     "storage.location.template"            = "s3://${aws_s3_bucket.smart_energy_bucket.bucket}/bronze/weather_actual/target_date=$${target_date}"

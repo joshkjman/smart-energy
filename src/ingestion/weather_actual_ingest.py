@@ -10,7 +10,7 @@ ARCHIVE_URL   = "https://archive-api.open-meteo.com/v1/archive"
 BRONZE_PREFIX = "bronze/weather_actual"
 MODEL         = "ecmwf_ifs"
 
-BACKFILL_START = dt.date(2026,7,11)
+BACKFILL_START = dt.date(2024,6,24)   # matches the weather FORECAST history in S3, not the constant in that module
 
 openmeteo = openmeteo_requests.Client()
 
