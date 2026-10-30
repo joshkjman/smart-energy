@@ -44,7 +44,7 @@ models:
         description: Demand 14 days before target, used as baseline for when lag_7d can't reach lead days (lead_days=7)
       - name: heating_degrees
         description: Degrees below base_temperature
-      - name: cooling_degrees
+      - name: cooling_degree
         description: Degrees above base_temperature
       - name: cutoff
         description: Time at demand_lag_mw, target_ts - lead_days - publication_lag
@@ -52,4 +52,36 @@ models:
         description: When weather forecast run was issued
       - name: demand_lag_ts
         description: Time of demand_lag_mw, target_ts - lead_days - publication_lag, to ensure there's no leakage of cutoff 
-        
+  - name: fct_forecast_accuracy
+    description: Measure error from predicted demand to both actual demand as well as baseline predictions which are from lag7/lag14 demand values
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - target_ts
+              - lead_days
+    columns:
+      - name: target_ts
+        description: Time that you want to predict
+        data_tests:
+          - not_null
+      - name: lead_days
+        description: Days before target_ts that your issue_ts starts on, where you run weather model prediction
+        data_tests:
+          - not_null
+      - name: predicted_mw
+        description: Demand prediction value for that target_ts
+        data_tests:
+          - not_null
+      - name: baseline_mw
+        description: This is the prediction using lag7/lag14 values, which are just 1-2 week old values used as a prediction (at lead 7 a 7-day anchor is unknowable at prediction time, so the 14-day one is the only legal option). Goal is to always beat this baseline.
+      - name: actual_mw
+        description: Actual demand value at target_ts
+      - name: signed_error_mw
+        description: Error between prediction and actual demand
+      - name: abs_error_mw
+        description: Absolute error between prediction and actual demand 
+      - name: baseline_signed_error_mw
+        description: Error between actual and baseline demand
+      - name: baseline_abs_error_mw
+        description: Absolute error between actual and baseline demand
