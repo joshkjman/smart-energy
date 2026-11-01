@@ -81,6 +81,7 @@ def generate_accuracy_over_time_sql(lead_days) -> str:
         issue_date, 
         lead_days,
         avg(abs_error_mw) as mae_mw,
+        avg(baseline_abs_error_mw) as baseline_mae_mw,
         count(*) as num_hours
     from gold.fct_forecast_accuracy
     where actual_mw is not null
@@ -125,6 +126,7 @@ def generate_mae_by_lead_sql() -> str:
     select 
         lead_days,
         avg(abs_error_mw) as mae_mw,
+        avg(baseline_abs_error_mw) as baseline_mae_mw,
         count(*) as num_hours
     from gold.fct_forecast_accuracy
     where actual_mw is not null
@@ -134,16 +136,38 @@ def generate_mae_by_lead_sql() -> str:
     return sql_string
 
 
+def generate_headline_sql(lead_days: int) -> str:
+    """The KPI row's single source: model vs baseline at ONE lead.
+
+    Returns exactly one row. Everything the metric row shows comes from here,
+    so the four numbers are guaranteed consistent with each other -- four
+    separate queries could disagree if a nightly run landed between them.
+    """
+    sql_string = f"""
+    select 
+        avg(abs_error_mw) as model_mae,
+        avg(baseline_abs_error_mw) as baseline_mae,
+        count(*) as scored_hours,
+        max(issue_date) as latest_issue,
+        ((avg(abs_error_mw) - avg(baseline_abs_error_mw)) / avg(abs_error_mw))::numeric * 100 as percent_diff
+    from gold.fct_forecast_accuracy
+    where actual_mw is not null
+    and lead_days = {lead_days}
+    """
+    return sql_string
+
+
+
 st.title("Foresight - GB electricity demand forecast")
 
 max_window = run_query("select date_diff('day', min(target_ts), current_timestamp) as max_days from gold.fct_forecast_accuracy where actual_mw is not null")["max_days"].item()
 
 lead_days = st.sidebar.slider(
-"Forecast lead (days)", 
-min_value=0,
-max_value=7,
-value=7,
-step=1,
+    "Forecast lead (days)", 
+    min_value=0,
+    max_value=7,
+    value=7,
+    step=1,
 )
 days_back = st.sidebar.slider(
     "History window (days)",
@@ -153,6 +177,33 @@ days_back = st.sidebar.slider(
     step=1,
 )
 
+headline = run_query(generate_headline_sql(lead_days))
+
+c1, c2, c3, c4 = st.columns(4)
+with c1:
+    st.metric(
+        label="Model MAE", 
+        value=f"{headline["model_mae"].item():,0f} MW"
+    )
+
+with c2:
+    st.metric(
+        label="Baseline MAE", 
+        value=f"{headline["baseline_mae"].item():,0f} MW"
+    )
+
+with c3:
+    st.metric(
+        label="Improvement %", 
+        value=f"{headline["percent_diff"].item():,2f}%"
+    )
+
+with c4:
+    st.metric(
+        label="Scored Hours", 
+        value=int(headline["scored_hours"].item())
+    )
+
 tab_recent, tab_forward, tab_accuracy = st.tabs(
     ["Recent accuracy", "Live forecast", "Accuracy over time"]
 )
@@ -160,18 +211,37 @@ tab_recent, tab_forward, tab_accuracy = st.tabs(
 with tab_recent:
     forecast_accuracy_sql = generate_forecast_accuracy_sql(lead_days, days_back)
     forecast_accuracy_df = run_query(forecast_accuracy_sql)
+    forecast_accuracy_df.rename(
+        columns={
+            "actual_mw": "Actual (MW)",
+            "predicted_mw": "Predicted (MW)"
+        }
+    )
 
     st.line_chart(
         forecast_accuracy_df, 
         x="target_ts", 
-        y=["actual_mw", "predicted_mw"],
+        y=["Actual (MW)", "Predicted (MW)"],
         x_label="Target time",
         y_label="Power demand (MW)",
     )
 
+    st.caption("""
+    Line chart of predicted demand against actual demand values.
+    Runs off how many days in the past you would like to see,
+    as well as the lead_days which is how recent of a forecast value the model uses. 
+    The more recent, the closer the predicted and actual values should be.
+    """)
+
 with tab_forward:
     latest_forecast_sql = generate_latest_forecast_sql()
     latest_forecast_df = run_query(latest_forecast_sql)
+    latest_forecast_df.rename(
+        columns={
+            "actual_mw": "Actual (MW)",
+            "predicted_mw": "Predicted (MW)"
+        }
+    )
     latest_forecast_df.drop("lead_days", axis=1, inplace=True)
 
     days_back_live = st.slider(
@@ -184,6 +254,12 @@ with tab_forward:
 
     recent_actuals_sql = generate_recent_actuals_sql(days_back_live)
     recent_actuals_df = run_query(recent_actuals_sql)
+    recent_actuals_df.rename(
+        columns={
+            "actual_mw": "Actual (MW)",
+            "predicted_mw": "Predicted (MW)"
+        }
+    )
 
     actual_w_forecast_df = pd.concat([latest_forecast_df, recent_actuals_df])
     actual_w_forecast_df.sort_values("target_ts", inplace=True)
@@ -191,34 +267,67 @@ with tab_forward:
     st.line_chart(
         actual_w_forecast_df,
         x="target_ts",
-        y=["actual_mw", "predicted_mw"],
+        y=["Actual (MW)", "Predicted (MW)"],
         x_label="Target time",
         y_label="Power demand (MW)",
     )
 
+    st.caption(
+    """
+    Line chart of actual demand data going into predicted data into the future.
+    """)
+
 with tab_accuracy:
     mae_by_lead_sql = generate_mae_by_lead_sql()
     mae_by_lead_df = run_query(mae_by_lead_sql)
+    mae_by_lead_df.rename(
+        columns={
+            "mae_mw": "MAE (MW)",
+            "baseline_mae_mw": "Baseline MAE (MW)"
+        }
+    )
 
     st.bar_chart(
         mae_by_lead_df,
         x="lead_days",
-        y="mae_mw",
+        y=["MAE (MW)", "Baseline MAE (MW)"],
         x_label="Lead day",
         y_label="Mean absolute error (MW)",
+        stack=False,
     )
+
+    st.caption(
+    """
+    Bar chart of Mean Absolute Error for predicted to actual values,
+    and Mean Absolute Error for baseline to actual values, both against
+    lead_days. Lead days increase should see an increase in MAE.
+    """)
 
     accuracy_over_time_sql = generate_accuracy_over_time_sql(lead_days)
     accuracy_over_time_df = run_query(accuracy_over_time_sql)
+    accuracy_over_time_df.rename(
+        columns={
+            "mae_mw": "MAE (MW)",
+            "baseline_mae_mw": "Baseline MAE (MW)"
+        }
+    )
 
     st.divider()
 
     st.bar_chart(
         accuracy_over_time_df,
         x="issue_date",
-        y="mae_mw",
+        y=["MAE (MW)", "Baseline MAE (MW)"],
         x_label="Issue date",
         y_label="Mean absolute error (MW)",
+        stack=False,
     )
+
+    st.caption(
+    """
+    Bar chart of Mean Absolute Error for predicted to actual values,
+    and Mean Absolute Error for baseline to actual values, both against
+    the issued date of forecast.
+    """)
 
     st.metric(label="Number of hours measued in this window", value=accuracy_over_time_df["num_hours"].sum())
