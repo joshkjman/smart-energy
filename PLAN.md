@@ -171,9 +171,9 @@ The phases below are numbered in a logical dependency order, but we are **not** 
 
 *Goal: the visual payoff. Spec: Phase 8.*
 
-- [ ] Build the Streamlit app: live demand vs. latest forecast.
-- [ ] Add the 7-day forecast view.
-- [ ] Add the accuracy-over-time view (the honesty centrepiece).
+- [x] Build the Streamlit app: live demand vs. latest forecast.
+- [x] Add the 7-day forecast view.
+- [x] Add the accuracy-over-time view (the honesty centrepiece).
 - [ ] (Optional) Octopus framing: cheapest predicted window beyond the published horizon.
 
 ---

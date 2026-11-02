@@ -1,0 +1,7 @@
+[theme]
+# Deliberately muted: the charts should be the only saturated thing on the page.
+primaryColor = "#1f6feb"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f6f8"
+textColor = "#1c2024"
+font = "sans serif"

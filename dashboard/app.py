@@ -149,7 +149,9 @@ def generate_headline_sql(lead_days: int) -> str:
         avg(baseline_abs_error_mw) as baseline_mae,
         count(*) as scored_hours,
         max(issue_date) as latest_issue,
-        ((avg(abs_error_mw) - avg(baseline_abs_error_mw)) / avg(abs_error_mw))::numeric * 100 as percent_diff
+        max(target_ts) as latest_actual,
+        count(distinct issue_date) as live_scoring_count,
+        ((avg(abs_error_mw) - avg(baseline_abs_error_mw)) / avg(baseline_abs_error_mw)) * 100 as percent_diff
     from gold.fct_forecast_accuracy
     where actual_mw is not null
     and lead_days = {lead_days}
@@ -159,49 +161,77 @@ def generate_headline_sql(lead_days: int) -> str:
 
 
 st.title("Foresight - GB electricity demand forecast")
+st.text("Project predicting GB energy demand values 1-7 days ahead.")
 
 max_window = run_query("select date_diff('day', min(target_ts), current_timestamp) as max_days from gold.fct_forecast_accuracy where actual_mw is not null")["max_days"].item()
 
+st.sidebar.subheader("Choosing day filters")
 lead_days = st.sidebar.slider(
-    "Forecast lead (days)", 
+    "Forecast lead (days):", 
     min_value=0,
     max_value=7,
     value=7,
     step=1,
 )
 days_back = st.sidebar.slider(
-    "History window (days)",
+    "History window (days):",
     min_value=1,
     max_value=max_window,
     value=max_window,
     step=1,
 )
 
+st.sidebar.divider()
+st.sidebar.markdown(
+    """
+    **About**
+
+    Serverless pipeline forecasting GB electricity demand 1-7 days ahead.
+
+    Every predictor is point-in-time correct: weather features come from
+    forecasts *as they were issued*, never from actuals recorded later, so the
+    backtest can't see information the live model wouldn't have had.
+
+    Ingestion to S3, transformed with dbt on Athena, LightGBM retrained offline,
+    nightly batch inference orchestrated by Step Functions.
+
+    [GitHub](https://github.com/joshkjman/smart-energy)
+    """
+)
+
 headline = run_query(generate_headline_sql(lead_days))
+latest_actual = headline["latest_actual"].item()
+latest_issue = headline["latest_issue"].item()
+live_scoring_count = headline["live_scoring_count"].item()
+st.caption(f"Scored against actuals through {latest_actual} · most recent graded issue {latest_issue} · {live_scoring_count} days of live scoring")
 
 c1, c2, c3, c4 = st.columns(4)
 with c1:
     st.metric(
         label="Model MAE", 
-        value=f"{headline["model_mae"].item():,0f} MW"
+        value=f"{headline["model_mae"].item():,.0f} MW",
+        border=True,
     )
 
 with c2:
     st.metric(
         label="Baseline MAE", 
-        value=f"{headline["baseline_mae"].item():,0f} MW"
+        value=f"{headline["baseline_mae"].item():,.0f} MW",
+        border=True,
     )
 
 with c3:
     st.metric(
         label="Improvement %", 
-        value=f"{headline["percent_diff"].item():,2f}%"
+        value=f"{headline["percent_diff"].item() * -1:,.2f}%",
+        border=True,
     )
 
 with c4:
     st.metric(
         label="Scored Hours", 
-        value=int(headline["scored_hours"].item())
+        value=int(headline["scored_hours"].item()),
+        border=True,
     )
 
 tab_recent, tab_forward, tab_accuracy = st.tabs(
@@ -215,9 +245,11 @@ with tab_recent:
         columns={
             "actual_mw": "Actual (MW)",
             "predicted_mw": "Predicted (MW)"
-        }
+        }, inplace=True
     )
 
+    if forecast_accuracy_df.empty:
+        st.info("No scored hours in this window — try a longer history.")
     st.line_chart(
         forecast_accuracy_df, 
         x="target_ts", 
@@ -226,44 +258,47 @@ with tab_recent:
         y_label="Power demand (MW)",
     )
 
-    st.caption("""
-    Line chart of predicted demand against actual demand values.
-    Runs off how many days in the past you would like to see,
-    as well as the lead_days which is how recent of a forecast value the model uses. 
-    The more recent, the closer the predicted and actual values should be.
-    """)
+    st.caption(
+        "Hourly forecast against what actually happened, at the forecast lead "
+        "selected in the sidebar. One lead at a time rather than all eight pooled: "
+        "the mart holds one row per (hour, lead), so pooling would stack eight "
+        "predictions on every hour and the forecast line would widen into a band. "
+        "Drag the lead down and the two lines should move closer together."
+    )
 
 with tab_forward:
     latest_forecast_sql = generate_latest_forecast_sql()
     latest_forecast_df = run_query(latest_forecast_sql)
     latest_forecast_df.rename(
         columns={
-            "actual_mw": "Actual (MW)",
             "predicted_mw": "Predicted (MW)"
-        }
+        }, inplace=True
     )
     latest_forecast_df.drop("lead_days", axis=1, inplace=True)
 
     days_back_live = st.slider(
-        "History window for live graph (days)",
+        "History window for live graph (days):",
         min_value=1,
         max_value=4,
         value=4,
         step=1,
     )
 
+    st.divider()
+
     recent_actuals_sql = generate_recent_actuals_sql(days_back_live)
     recent_actuals_df = run_query(recent_actuals_sql)
     recent_actuals_df.rename(
         columns={
             "actual_mw": "Actual (MW)",
-            "predicted_mw": "Predicted (MW)"
-        }
+        }, inplace=True
     )
 
     actual_w_forecast_df = pd.concat([latest_forecast_df, recent_actuals_df])
     actual_w_forecast_df.sort_values("target_ts", inplace=True)
 
+    if actual_w_forecast_df.empty:
+        st.info("No scored hours in this window — try a longer history.")
     st.line_chart(
         actual_w_forecast_df,
         x="target_ts",
@@ -273,9 +308,13 @@ with tab_forward:
     )
 
     st.caption(
-    """
-    Line chart of actual demand data going into predicted data into the future.
-    """)
+        "The live forecast: the most recent nightly issue, with recent actuals "
+        "alongside it. The two series overlap in time rather than meeting at a "
+        "single point -- the chain issues at 22:10 UTC and forecasts eight days "
+        "ahead, so the earliest target hours have already happened while the rest "
+        "are still unknowable. The stretch beyond the last actual is the part the "
+        "model is actually being asked to do."
+    )
 
 with tab_accuracy:
     mae_by_lead_sql = generate_mae_by_lead_sql()
@@ -284,9 +323,11 @@ with tab_accuracy:
         columns={
             "mae_mw": "MAE (MW)",
             "baseline_mae_mw": "Baseline MAE (MW)"
-        }
+        }, inplace=True
     )
 
+    if mae_by_lead_df.empty:
+        st.info("No scored hours in this window — try a longer history.")
     st.bar_chart(
         mae_by_lead_df,
         x="lead_days",
@@ -297,11 +338,13 @@ with tab_accuracy:
     )
 
     st.caption(
-    """
-    Bar chart of Mean Absolute Error for predicted to actual values,
-    and Mean Absolute Error for baseline to actual values, both against
-    lead_days. Lead days increase should see an increase in MAE.
-    """)
+        "The headline result. Model error against the seasonal-naive baseline -- "
+        "the same hour on the most recent same-weekday anchor the publication gate "
+        "allows -- at every horizon. The model wins at all eight leads, by a wide "
+        "margin at lead 0 where recent demand still carries most of the signal, "
+        "and by a steadier margin further out. Bars are side-by-side, not stacked: "
+        "each height is its own MAE, not a running total."
+    )
 
     accuracy_over_time_sql = generate_accuracy_over_time_sql(lead_days)
     accuracy_over_time_df = run_query(accuracy_over_time_sql)
@@ -309,11 +352,13 @@ with tab_accuracy:
         columns={
             "mae_mw": "MAE (MW)",
             "baseline_mae_mw": "Baseline MAE (MW)"
-        }
+        }, inplace=True
     )
 
     st.divider()
 
+    if accuracy_over_time_df.empty:
+        st.info("No scored hours in this window — try a longer history.")
     st.bar_chart(
         accuracy_over_time_df,
         x="issue_date",
@@ -324,10 +369,9 @@ with tab_accuracy:
     )
 
     st.caption(
-    """
-    Bar chart of Mean Absolute Error for predicted to actual values,
-    and Mean Absolute Error for baseline to actual values, both against
-    the issued date of forecast.
-    """)
-
-    st.metric(label="Number of hours measued in this window", value=accuracy_over_time_df["num_hours"].sum())
+        "The honesty view: the same comparison broken out by nightly issue, at the "
+        "selected lead. Flat is the good outcome -- it means the headline above is "
+        "not an artefact of one lucky week. A spike is a day the pipeline or the "
+        "weather forecast went wrong, and those days stay in the average rather "
+        "than being dropped."
+    )
