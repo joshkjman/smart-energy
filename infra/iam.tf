@@ -226,6 +226,7 @@ data "aws_iam_policy_document" "dbt_build_permissions" {
     resources = [
       "${aws_s3_bucket.smart_energy_bucket.arn}/bronze/*",
       "${aws_s3_bucket.smart_energy_bucket.arn}/silver/*",
+      "${aws_s3_bucket.smart_energy_bucket.arn}/gold/*",
       "${aws_s3_bucket.smart_energy_bucket.arn}/build-source/*"
     ]
   }
