@@ -1,7 +1,13 @@
 [theme]
-# Deliberately muted: the charts should be the only saturated thing on the page.
-primaryColor = "#1f6feb"
+# Chrome stays desaturated; the charts are the only saturated thing on the page.
 backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f4f6f8"
+secondaryBackgroundColor = "#f0f2f5"
 textColor = "#1c2024"
+primaryColor = "#1f6feb"
+borderColor = "#c3d2e3"
+baseRadius = "0.5rem"
 font = "sans serif"
+
+[theme.sidebar]
+backgroundColor = "#eff4fa"
+borderColor = "#c3d2e3"

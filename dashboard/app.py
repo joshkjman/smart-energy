@@ -7,9 +7,6 @@ from ml.athena import get_athena_connection
 
 
 
-st.set_page_config(page_title="Foresight", layout="wide")
-
-
 @st.cache_data(ttl=900)
 def run_query(sql: str) -> pd.DataFrame:
     """Run `sql` against the gold schema and return the result as a frame.
@@ -159,6 +156,7 @@ def generate_headline_sql(lead_days: int) -> str:
     return sql_string
 
 
+st.set_page_config(page_title="Foresight", layout="wide", page_icon=":chart_with_upwards_trend:")
 
 st.title("Foresight - GB electricity demand forecast")
 st.text("Project predicting GB energy demand values 1-7 days ahead.")
@@ -205,7 +203,9 @@ latest_issue = headline["latest_issue"].item()
 live_scoring_count = headline["live_scoring_count"].item()
 st.caption(f"Scored against actuals through {latest_actual} · most recent graded issue {latest_issue} · {live_scoring_count} days of live scoring")
 
-c1, c2, c3, c4 = st.columns(4)
+# st.divider()
+
+c1, c2, c3, c4 = st.columns(4, gap="medium")
 with c1:
     st.metric(
         label="Model MAE", 
@@ -234,6 +234,8 @@ with c4:
         border=True,
     )
 
+st.divider()
+
 tab_recent, tab_forward, tab_accuracy = st.tabs(
     ["Recent accuracy", "Live forecast", "Accuracy over time"]
 )
@@ -250,15 +252,20 @@ with tab_recent:
 
     if forecast_accuracy_df.empty:
         st.info("No scored hours in this window — try a longer history.")
+
+    st.subheader("Forecast accuracy")
     st.line_chart(
         forecast_accuracy_df, 
         x="target_ts", 
         y=["Actual (MW)", "Predicted (MW)"],
         x_label="Target time",
         y_label="Power demand (MW)",
+        color=["#5c6370", "#1f6feb"],
+        height=420,
     )
 
-    st.caption(
+    recent_caption_container = st.container(border=True)
+    recent_caption_container.caption(
         "Hourly forecast against what actually happened, at the forecast lead "
         "selected in the sidebar. One lead at a time rather than all eight pooled: "
         "the mart holds one row per (hour, lead), so pooling would stack eight "
@@ -299,15 +306,20 @@ with tab_forward:
 
     if actual_w_forecast_df.empty:
         st.info("No scored hours in this window — try a longer history.")
+
+    st.subheader("Forecast with actuals")
     st.line_chart(
         actual_w_forecast_df,
         x="target_ts",
         y=["Actual (MW)", "Predicted (MW)"],
         x_label="Target time",
         y_label="Power demand (MW)",
+        color=["#5c6370", "#1f6feb"],
+        height=420,
     )
 
-    st.caption(
+    actual_w_forecast_caption_container = st.container(border=True)
+    actual_w_forecast_caption_container.caption(
         "The live forecast: the most recent nightly issue, with recent actuals "
         "alongside it. The two series overlap in time rather than meeting at a "
         "single point -- the chain issues at 22:10 UTC and forecasts eight days "
@@ -328,6 +340,8 @@ with tab_accuracy:
 
     if mae_by_lead_df.empty:
         st.info("No scored hours in this window — try a longer history.")
+
+    st.subheader("Error by forecast horizon")
     st.bar_chart(
         mae_by_lead_df,
         x="lead_days",
@@ -335,9 +349,12 @@ with tab_accuracy:
         x_label="Lead day",
         y_label="Mean absolute error (MW)",
         stack=False,
+        color=["#1f6feb", "#9aa3b0"],
+        height=360,
     )
 
-    st.caption(
+    mae_by_lead_caption_container = st.container(border=True)
+    mae_by_lead_caption_container.caption(
         "The headline result. Model error against the seasonal-naive baseline -- "
         "the same hour on the most recent same-weekday anchor the publication gate "
         "allows -- at every horizon. The model wins at all eight leads, by a wide "
@@ -359,6 +376,8 @@ with tab_accuracy:
 
     if accuracy_over_time_df.empty:
         st.info("No scored hours in this window — try a longer history.")
+
+    st.subheader("Error by nightly run")
     st.bar_chart(
         accuracy_over_time_df,
         x="issue_date",
@@ -366,9 +385,12 @@ with tab_accuracy:
         x_label="Issue date",
         y_label="Mean absolute error (MW)",
         stack=False,
+        color=["#1f6feb", "#9aa3b0"],
+        height=360,
     )
 
-    st.caption(
+    accuracy_over_time_caption_container = st.container(border=True)
+    accuracy_over_time_caption_container.caption(
         "The honesty view: the same comparison broken out by nightly issue, at the "
         "selected lead. Flat is the good outcome -- it means the headline above is "
         "not an artefact of one lucky week. A spike is a day the pipeline or the "
