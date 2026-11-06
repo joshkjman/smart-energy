@@ -85,3 +85,5 @@ models:
         description: Error between actual and baseline demand
       - name: baseline_abs_error_mw
         description: Absolute error between actual and baseline demand
+  - name: fct_demand_serving
+    description: Gets all knowable rows of feature data at that latest issued time

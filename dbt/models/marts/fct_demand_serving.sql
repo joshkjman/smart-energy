@@ -2,8 +2,12 @@
     materialized='view'
 ) }}
 
+with knowable as (
+    select *
+    from {{ ref('int_demand_feature_rows') }}
+    where cutoff <= current_timestamp
+    and demand_lag_mw is not null
+)
 select *
-from {{ ref('int_demand_feature_rows') }}
-where issue_ts = cast(current_date as timestamp)
-and cutoff <= current_timestamp
-and demand_lag_mw is not null
+from knowable
+where issue_ts = (select max(issue_ts) from knowable)

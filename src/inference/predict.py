@@ -17,6 +17,20 @@ FORECAST_PREFIX = "bronze/inference_forecasts"
 WORK_GROUP      = "foresight_queries" 
 REGION          = "eu-west-2"
 
+# How old the issue we're serving may be before we refuse to write.
+#
+# fct_demand_serving now anchors on max(issue_ts) rather than current_date, so
+# it can no longer come back empty -- which means a stale dbt build would stop
+# raising and start silently rewriting an old partition instead. Nothing would
+# advance, every state would report SUCCESS. The age check is what keeps that
+# failure loud.
+#
+# issue_ts is midnight-stamped and the chain fires at 22:10 UTC, so a healthy
+# run sees an issue ~22h old and a run that missed a whole day sees ~46h. 36h
+# sits between the two: it tolerates a late retry or a post-midnight manual
+# invoke (~24h) and rejects a missed day.
+MAX_ISSUE_AGE_HOURS = 36
+
 s3 = boto3.client('s3')
 
 
@@ -84,15 +98,37 @@ def build_forecast_records(df: pd.DataFrame, booster: lgb.Booster, version: str)
     return output
 
 
+def assert_issue_is_fresh(issue_ts: pd.Timestamp) -> None:
+    """Refuse to write if the issue we'd be serving is too old to be tonight's.
+
+    Raises so the Step Functions state fails visibly rather than re-landing a
+    partition that is already there.
+    """
+    age = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) - issue_ts.to_pydatetime()
+    if age > dt.timedelta(hours=MAX_ISSUE_AGE_HOURS):
+        raise ValueError(
+            f"Stale serving data: newest issue_ts is {issue_ts} "
+            f"({age.total_seconds() / 3600:.1f}h old, limit {MAX_ISSUE_AGE_HOURS}h). "
+            "dbt has not rebuilt int_demand_feature_rows, or weather/demand ingestion is behind. "
+            "Writing anyway would overwrite an existing partition and advance nothing."
+        )
+
+
 def handler(event, context):
     version = latest_model_version()
     booster, metadata = load_model(version)
     df = load_serving_rows(metadata["categorical_features"])
     if df.empty:
-        raise ValueError("fct_demand_serving is returning no rows. dbt could be stale or demand ingestion is behind.")
-    
+        raise ValueError(
+            "fct_demand_serving is returning no rows. int_demand_feature_rows is empty, "
+            "or every row is still ahead of its cutoff."
+        )
+
+    issue_ts = df["issue_ts"].max()
+    assert_issue_is_fresh(issue_ts)
+
     output = build_forecast_records(df, booster, version)
-    issue_date = df["issue_ts"].max().date()
+    issue_date = issue_ts.date()
     body = '{"data":' + output.to_json(orient="records", date_format="iso") + '}'
 
     key = f"{FORECAST_PREFIX}/issue_date={issue_date}/forecasts.json"

@@ -19,7 +19,6 @@ sources:
         loaded_at_field: "cast(issue_date as timestamp)"
         freshness:
           warn_after: {count: 30, period: hour}
-          error_after: {count: 48, period: hour}
       - name: weather_actual
         loaded_at_field: "cast(target_date as timestamp)"
         freshness:
