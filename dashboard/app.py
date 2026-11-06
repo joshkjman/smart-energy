@@ -156,8 +156,57 @@ def generate_headline_sql(lead_days: int) -> str:
     return sql_string
 
 
-st.set_page_config(page_title="Foresight", layout="wide", page_icon=":chart_with_upwards_trend:")
+def generate_cheapest_window_sql(window_hours: int) -> str:
+    """Lowest-predicted-demand window on each of the next 8 days.
 
+    The practical payoff of the forecast. Demand sets the marginal plant via
+    the merit order, so the lowest-demand hours are the cheapest hours -- and
+    at leads 2-7 nobody has published a price yet, so a forecast is the only
+    way to answer "when should I run this on Thursday".
+
+    Returns one row per target date: the window start, its mean predicted
+    demand, and that day's peak for contrast.
+    """
+    sql_text = f"""
+    with f as (
+    select 
+        target_ts,
+        lead_days,
+        predicted_mw,
+        date(target_ts) as target_date
+    from silver.stg_inference_forecasts
+    where issue_date = (select max(issue_date) from silver.stg_inference_forecasts)
+    ),
+    windows as (
+    select 
+        f.*,
+        avg(predicted_mw) over (partition by date(target_ts) order by target_ts rows between current row and {window_hours - 1} following) as window_mean_mw,
+        count(*) over (partition by date(target_ts) order by target_ts rows between current row and {window_hours - 1} following) as hours_in_window,
+        max(predicted_mw) over (partition by date(target_ts)) as day_peak_mw
+    from f
+    ),
+    ranked as (
+    select
+        w.*,
+        row_number() over (partition by target_date order by window_mean_mw) as rn
+    from windows w
+    where hours_in_window = {window_hours}
+    )
+    select 
+        lead_days,
+        window_mean_mw,
+        day_peak_mw,
+        format_datetime(target_ts, 'EEE') as day,
+        format_datetime(target_ts, 'HH:mm') as window_start,
+        day_peak_mw - window_mean_mw as saving_vs_peak_mw
+    from ranked
+    where rn = 1
+    order by window_mean_mw
+    """
+    return sql_text
+
+
+st.set_page_config(page_title="Foresight", layout="wide", page_icon=":chart_with_upwards_trend:")
 st.title("Foresight - GB electricity demand forecast")
 st.text("Project predicting GB energy demand values 1-7 days ahead.")
 
@@ -236,8 +285,8 @@ with c4:
 
 st.divider()
 
-tab_recent, tab_forward, tab_accuracy = st.tabs(
-    ["Recent accuracy", "Live forecast", "Accuracy over time"]
+tab_recent, tab_forward, tab_accuracy, tab_cheapest = st.tabs(
+    ["Recent accuracy", "Live forecast", "Accuracy over time", "Best time to use energy"]
 )
 
 with tab_recent:
@@ -301,7 +350,7 @@ with tab_forward:
         }, inplace=True
     )
 
-    actual_w_forecast_df = pd.concat([latest_forecast_df, recent_actuals_df])
+    actual_w_forecast_df = pd.merge(latest_forecast_df, recent_actuals_df, on="target_ts", how="outer")
     actual_w_forecast_df.sort_values("target_ts", inplace=True)
 
     if actual_w_forecast_df.empty:
@@ -396,4 +445,47 @@ with tab_accuracy:
         "not an artefact of one lucky week. A spike is a day the pipeline or the "
         "weather forecast went wrong, and those days stay in the average rather "
         "than being dropped."
+    )
+
+
+with tab_cheapest:
+    st.subheader("Cheapest predicted window, next 8 days")
+
+    window_hours = st.slider("Usage window length (hours)", 1, 6, 3)
+    cheapest_window_sql = generate_cheapest_window_sql(window_hours)
+    cheapest_window_df = run_query(cheapest_window_sql)
+
+    if cheapest_window_df.empty:
+        st.info("No forecast available — the nightly chain may not have run yet.")
+    else:
+        st.dataframe(
+            cheapest_window_df, 
+            hide_index=True,
+            column_order=[
+                "day",
+                "window_start",
+                "window_mean_mw",
+                "day_peak_mw",
+                "saving_vs_peak_mw",
+                "lead_days"
+            ],
+            column_config={
+                "window_mean_mw": st.column_config.NumberColumn("Window mean demand", format="%,.0f MW"),
+                "day_peak_mw": st.column_config.NumberColumn("Day peak demand", format="%,.0f MW"),
+                "saving_vs_peak_mw": st.column_config.NumberColumn("Power saved", format="%,.0f MW"),
+                "lead_days": "Lead days",
+                "day": "Day of week",
+                "window_start": "Window start time"
+            }
+        )
+
+
+    cheapest_window_container = st.container(border=True)
+    cheapest_window_container.caption(
+        "Lowest predicted demand is a proxy for cheapest, not a price forecast. "
+        "Demand drives the marginal plant and therefore wholesale cost; it does "
+        "**not** account for wind, which is the larger driver of carbon intensity. "
+        "A real tariff recommendation needs the price itself -- see the README's "
+        "next steps. Days 2-8 are the useful ones: Octopus publishes Agile prices "
+        "only a day ahead, so beyond that a forecast is the only answer available."
     )

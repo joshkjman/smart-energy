@@ -174,7 +174,34 @@ The phases below are numbered in a logical dependency order, but we are **not** 
 - [x] Build the Streamlit app: live demand vs. latest forecast.
 - [x] Add the 7-day forecast view.
 - [x] Add the accuracy-over-time view (the honesty centrepiece).
-- [ ] (Optional) Octopus framing: cheapest predicted window beyond the published horizon.
+- [x] (Optional) Octopus framing: cheapest predicted window beyond the published horizon. **Built as the "Best time to use energy" tab** — lowest-predicted-demand window per day for the next 8 days, from the forecast alone. No price data, no new ingestion, no new model: it reads `silver.stg_inference_forecasts`, which the dbt role already had access to. Framed on the page as a *proxy* for cheapest (demand sets the marginal plant via merit order) and explicitly **not** a carbon claim, since wind drives carbon intensity more than demand does.
+- [ ] (Next) Red/amber/green banding on that tab — as **percentile ranks against the trailing historical distribution**, not clusters. Tested k-means first and rejected it: the eight daily windows are a 7.5% continuum with no dominant gap, and 1% noise (≈210 MW, an order of magnitude below the 1,961 MW MAE at lead 7) reshuffled the groupings in 86% of 200 trials, so "Thursday is amber" would flip between nightly runs with nothing real having changed. **The silhouette score endorsed it at 0.57 — and uniform random data of the same size scores 0.62**, so the metric was measuring the act of cutting a sorted line into thirds, not structure. General lesson, same shape as the seasonal-naive baseline: a metric is not evidence until you know what it scores on nothing.
+
+---
+
+## Phase 8b — Two deployment bugs the dashboard surfaced
+
+*Both found by building the dashboard against live data rather than by reading code. Recorded because the lesson is the deliverable.*
+
+- [x] **The dbt deploy is coupled to `terraform apply`, and nothing says so.** CodeBuild reads
+  its source from `s3://smart-energy-lake/build-source/source.zip`, which only
+  `terraform apply` refreshes (`infra/s3.tf:127`, `archive_file` at `infra/lambda.tf:42`).
+  The mart change of 2026-10-30 built fine locally, then the nightly rebuilt the table from
+  the 2026-10-24 snapshot and silently dropped the new baseline columns — reporting
+  **SUCCEEDED** both nights, because the models and their tests reverted together and stayed
+  mutually consistent. Caught only when the dashboard hit `COLUMN_NOT_FOUND`. *No dbt test
+  can detect this*: every test it could run comes from the same stale snapshot. Detection has
+  to live outside dbt — compare deployed source to git HEAD — or the coupling has to go.
+- [x] **A freshness gate on my own output deadlocked the chain.** `sources.yml` sets
+  `error_after: 48 hour` on `bronze.inference_forecasts`, but the chain is
+  `DemandIngest → SourceFreshness → DbtBuild → Inference`: the gate is step 2 and the
+  producer is step 4. When 2026-11-03 died at `DbtBuild` (a missing `s3:GetObject` on
+  `gold/*` — the role could write gold but not read it back, so six tests ERRORed rather than
+  failed), inference never ran. From then on the gate saw a stale table and refused to run
+  the chain that would have refreshed it. One bad night became a multi-day outage needing
+  manual intervention. **Rule: gate freshness on data you do not control.** Your own
+  artefact being stale is a symptom, not a cause.
+- [ ] Apply the fix: drop `error_after` on `inference_forecasts` (keep `warn_after`).
 
 ---
 

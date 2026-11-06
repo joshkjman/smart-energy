@@ -1,6 +1,6 @@
 # Multi-Day GB Energy Demand Forecasting
 
-> A serverless, point-in-time-correct forecasting pipeline on AWS. Ingests live GB electricity demand, issued weather forecasts, carbon intensity, and Octopus Agile prices; builds a leakage-safe feature store; trains and walk-forward-validates a demand forecaster; and tracks forecast accuracy against reality as it arrives.
+> A serverless, point-in-time-correct forecasting pipeline on AWS. Ingests live GB electricity demand and issued weather forecasts; builds a leakage-safe feature store; trains and walk-forward-validates a demand forecaster; and tracks forecast accuracy against reality as it arrives.
 
 <!-- TODO: replace with a real screenshot of the dashboard's forecast-vs-actual view -->
 <!-- ![Dashboard](docs/dashboard.png) -->
@@ -25,9 +25,7 @@ Current results: the model beats a seasonal-naive baseline by **23–44%** at ev
 EventBridge (schedules)
    ├─▶ Lambda: ingest demand (NESO/Elexon)
    ├─▶ Lambda: ingest weather forecasts (Open-Meteo Previous Runs)
-   ├─▶ Lambda: ingest weather actuals (ERA5 / Historical Forecast)
-   ├─▶ Lambda: ingest carbon intensity
-   └─▶ Lambda: ingest Agile prices
+   └─▶ Lambda: ingest weather actuals (ERA5 / Historical Forecast)
             │
             ▼
       S3 Bronze (raw, Parquet)  ──▶  Glue Crawler ──▶ Glue Data Catalog
@@ -68,12 +66,17 @@ model artefact (S3, versioned)        Accuracy tracker ──▶ Streamlit dashb
 
 All open, no paid access required.
 
+**In the pipeline today:**
+
 - **GB electricity demand** — NESO / Elexon Insights (half-hourly)
 - **Weather forecasts (predictors)** — Open-Meteo Previous Runs API (forecast-as-issued, 1–7 day lead offsets)
 - **Weather actuals (targets)** — Open-Meteo Historical Forecast / ERA5
+- **Calendar** — UK bank holidays (gov.uk)
+
+**Planned, not built** (see [What I'd do next](#what-id-do-next)):
+
 - **Carbon intensity** — Carbon Intensity API (api.carbonintensity.org.uk)
 - **Agile prices** — Octopus Energy public API
-- **Calendar** — UK bank holidays (gov.uk)
 
 <!-- TODO: confirm exact endpoints/params you settled on and link them here -->
 
@@ -97,7 +100,7 @@ foresight/
 
 ## Getting started
 
-> **Prerequisites:** an AWS account, Terraform ≥ <!-- TODO version -->, Python ≥ <!-- TODO version -->, and AWS credentials configured.
+> **Prerequisites:** an AWS account, Terraform ≥ 1.10 (AWS provider ~> 5.92), Python 3.12, and AWS credentials configured via `~/.aws/credentials`.
 
 > ⚠️ **Cost first.** Set a billing alarm before provisioning anything. This stack is serverless by design and costs a few £/month with disciplined teardown, but always `terraform destroy` when you're not actively working.
 
@@ -107,17 +110,45 @@ cd infra
 terraform init
 terraform apply
 
-# 2. Run the pipeline
-# TODO: the actual command(s) — e.g. trigger the Step Functions state machine
+# 2. Run the nightly chain on demand
+#    (it also runs itself at 22:10 UTC via EventBridge)
+aws stepfunctions start-execution   --state-machine-arn "$(aws stepfunctions list-state-machines       --query "stateMachines[?name=='smart-energy-nightly'].stateMachineArn" --output text)"   --region eu-west-2
 
 # 3. View the dashboard
-# TODO: how to launch Streamlit and point it at the data
+pip install -r requirements-dashboard.txt
+streamlit run dashboard/app.py
 
 # 4. Tear down when done
 terraform destroy
 ```
 
 <!-- TODO: flesh out each step with real commands once built. See docs/TEARDOWN.md for full teardown. -->
+
+---
+
+## The dashboard
+
+`streamlit run dashboard/app.py`. Four tabs, reading `gold.fct_forecast_accuracy` and
+`silver.stg_inference_forecasts` directly through Athena.
+
+A KPI row above the tabs shows, at the selected lead: model MAE, baseline MAE, the
+improvement, and how many hours have been scored — all from a single query, so the four
+numbers cannot disagree with each other.
+
+| tab | what it answers |
+|---|---|
+| **Recent accuracy** | Hour by hour, how close was the forecast at this lead? |
+| **Live forecast** | The current nightly issue, with recent actuals joined on, so the handoff from measured to predicted is visible in one line. |
+| **Accuracy over time** | Error by horizon and by nightly run, each against the seasonal-naive baseline. The honesty view: a flat series means the headline is not one lucky week. |
+| **Best time to use energy** | The lowest-predicted-demand window on each of the next 8 days — the practical output of the forecast. |
+
+**On that last tab, deliberately:** lowest predicted demand is a proxy for *cheapest*, not a
+price forecast. Demand sets the marginal plant through the merit order and therefore
+wholesale cost; it does **not** account for wind, which is the larger driver of carbon
+intensity. Days 2–8 are the ones that add anything, because Octopus publishes Agile prices
+only a day ahead — beyond that, a forecast is the only answer available. A real tariff
+recommendation needs the price itself, which is why price ingestion is listed as next work
+rather than quietly implied.
 
 ---
 
@@ -242,13 +273,61 @@ Demand (and price) forecasting underpins grid balancing, tariff-setting, and fle
 
 ---
 
-## What I'd do differently at scale
+<a id="what-id-do-next"></a>
 
-<!-- TODO: keep this honest and specific as the project teaches you things -->
+## What I'd do next
+
+In rough order of value, and honest about why each is not built yet.
+
+1. **Decouple the dbt deploy from `terraform apply`.** The nightly CodeBuild job reads its
+   source from an S3 zip that only Terraform refreshes. For eight days it therefore ran an
+   older copy of the dbt project than the one in git — rebuilding a mart from a stale model
+   definition every night and reporting SUCCEEDED, because the models and their tests
+   reverted together and stayed self-consistent. No dbt test can catch this: every test it
+   could run comes from the same stale snapshot. Detection has to compare deployed source
+   against git, or the coupling has to go.
+
+2. **Stop gating source freshness on my own output.** `sources.yml` sets
+   `error_after: 48 hour` on `bronze.inference_forecasts`, but that table is written by the
+   *last* step of the chain and the freshness check is the *second*. One unrelated failure
+   left inference unrun; the next night the gate saw a stale table and refused to run the
+   chain that would have refreshed it. A single bad night became a multi-day outage needing
+   manual intervention. Freshness gates belong on data you do not control — demand, weather.
+   Your own artefact being stale is a symptom, not a cause.
+
+3. **Agile price ingestion, then a price model at 2–7 days.** Forecasting inside the
+   published window is copying a published answer; the honest target is beyond it. This is a
+   second forecasting problem sharing the same infrastructure — new target, new baseline, new
+   validation, and gas price as a genuine feature (it sets the marginal cost via merit order,
+   while being a weak feature for *demand*, which is price-inelastic at this horizon).
+
+4. **Red/amber/green banding on the best-time tab** — as percentile ranks against the
+   trailing historical distribution, not clusters. I tested k-means for this: the eight daily
+   windows are a continuum, not groups, and 1% noise (an order of magnitude below the model's
+   own MAE) reshuffled the bands in 86% of trials. The silhouette score endorsed the
+   clustering at 0.57 — but uniform random data of the same size scores 0.62, so the metric
+   was measuring nothing. Percentile thresholds are stable, explainable, and need no model.
+
+5. **Fix the lead-dependent bias.** The live forecast under-predicts by a margin that grows
+   with horizon, which the backtest did not predict — the lag anchors carry less information
+   further out. A trend feature, a longer rolling mean, or recency-weighted training are the
+   candidates; this is coupled to the retrain path.
+
+6. **Bitemporal demand.** Demand revisions currently overwrite initial values, so
+   `demand_lag_mw` has a residual leak: a lag computed today sees a revised number that was
+   not available at prediction time. The fix is to keep both the initial and revised series
+   and read the as-of-prediction-time value.
+
+7. **The flat-import cleanup.** `src/ml/train.py` and friends import siblings directly
+   (`from athena import ...`), so they only run from inside `src/ml/`. That blocks a proper
+   `pip install -e .`, which is why the dashboard needs a `sys.path` bootstrap.
+
+## What I'd do differently at scale
 
 - Feature store → a managed offline/online store if data volume grew
 - A genuine high-frequency source (e.g. live smart-meter feeds) would justify a streaming layer; the current half-hourly data does not
 - Multi-region / probabilistic forecasts (prediction intervals, not just point forecasts)
+- Merge the two CodeBuild steps: per-build minute rounding cost 24 of 88 billed minutes in October (27%), though the trade-off is losing the distinct failure state name in Step Functions
 
 ---
 
