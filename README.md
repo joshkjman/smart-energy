@@ -13,7 +13,7 @@ Foresight forecasts GB electricity demand **1–7 days ahead** — at the horizo
 
 The project is built to demonstrate **data-engineering judgement**, not just model accuracy. The interesting parts are the point-in-time-correct feature store (no peeking at the future) and the deliberate, defensible AWS service choices — including the services I *didn't* use.
 
-Current results: the model beats a seasonal-naive baseline by **23–44%** at every horizon under walk-forward validation. See [Results](#results).
+Current results: the model beats a seasonal-naive baseline by **27–48%** at every horizon under walk-forward validation. See [Results](#results).
 
 ---
 

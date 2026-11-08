@@ -1,10 +1,20 @@
 import pandas as pd
 import streamlit as st
+import altair as alt
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from ml.athena import get_athena_connection
 
+
+
+APPLIANCES = {
+    "Dishwasher (eco)": 3,
+    "Washing machine": 2,
+    "Tumble dryer": 2,
+    "EV charge": 6,
+    "Custom": None,
+}
 
 
 @st.cache_data(ttl=900)
@@ -198,10 +208,24 @@ def generate_cheapest_window_sql(window_hours: int) -> str:
         day_peak_mw,
         format_datetime(target_ts, 'EEE') as day,
         format_datetime(target_ts, 'HH:mm') as window_start,
+        format_datetime(date_add('hour', {window_hours}, target_ts), 'HH:mm') as window_end,
         day_peak_mw - window_mean_mw as saving_vs_peak_mw
     from ranked
     where rn = 1
     order by window_mean_mw
+    """
+    return sql_text
+
+
+def generate_forecast_grid_sql():
+    sql_text = """
+    select 
+        format_datetime(target_ts, 'EEE dd/MM') as day,
+        extract(hour from target_ts) as hour_of_day,
+        predicted_mw
+    from silver.stg_inference_forecasts
+    where issue_date = (select max(issue_date) from silver.stg_inference_forecasts)
+    order by target_ts
     """
     return sql_text
 
@@ -250,7 +274,7 @@ headline = run_query(generate_headline_sql(lead_days))
 latest_actual = headline["latest_actual"].item()
 latest_issue = headline["latest_issue"].item()
 live_scoring_count = headline["live_scoring_count"].item()
-st.caption(f"Scored against actuals through {latest_actual} · most recent graded issue {latest_issue} · {live_scoring_count} days of live scoring")
+st.caption(f"Scored against actuals through {latest_actual} · Most recent graded issue {latest_issue} · {live_scoring_count} days of live scoring")
 
 # st.divider()
 
@@ -449,35 +473,90 @@ with tab_accuracy:
 
 
 with tab_cheapest:
-    st.subheader("Cheapest predicted window, next 8 days")
+    st.subheader("Best time to use energy, next 8 days")
 
-    window_hours = st.slider("Usage window length (hours)", 1, 6, 3)
+    appliance_choice = st.selectbox("What are you running?", list(APPLIANCES))
+    if APPLIANCES[appliance_choice]:
+        window_hours = APPLIANCES[appliance_choice]
+    else:
+        window_hours = st.slider("Usage window length (hours)", 1, 6, 3)
+
     cheapest_window_sql = generate_cheapest_window_sql(window_hours)
     cheapest_window_df = run_query(cheapest_window_sql)
 
     if cheapest_window_df.empty:
         st.info("No forecast available — the nightly chain may not have run yet.")
     else:
-        st.dataframe(
-            cheapest_window_df, 
-            hide_index=True,
-            column_order=[
-                "day",
-                "window_start",
-                "window_mean_mw",
-                "day_peak_mw",
-                "saving_vs_peak_mw",
-                "lead_days"
-            ],
-            column_config={
-                "window_mean_mw": st.column_config.NumberColumn("Window mean demand", format="%,.0f MW"),
-                "day_peak_mw": st.column_config.NumberColumn("Day peak demand", format="%,.0f MW"),
-                "saving_vs_peak_mw": st.column_config.NumberColumn("Power saved", format="%,.0f MW"),
-                "lead_days": "Lead days",
-                "day": "Day of week",
-                "window_start": "Window start time"
-            }
-        )
+        best = cheapest_window_df.iloc[0] # ordered by window_mean_mw
+
+        hero = st.container(border=True)
+        hero.markdown(f"Best window: **{best["day"]} {best["window_start"]}-{best["window_end"]}**")
+
+        c1, c2, c3 = hero.columns(3)
+        with c1:
+            st.metric(
+                label="Mean demand in window", 
+                value=f"{best["window_mean_mw"]:,.0f} MW",
+                border=True,
+            )
+
+        with c3:
+            st.metric(
+                label="Demand below day's peak",
+                value=f"{best["saving_vs_peak_mw"]:,.0f} MW",
+                border=True,
+            )
+
+        with c2:
+            st.metric(
+                label="Days ahead", 
+                value=f"{best["lead_days"]} day(s)",
+                border=True,
+            )
+
+        st.divider()
+
+        forecast_grid_sql = generate_forecast_grid_sql()
+        forecast_grid_df = run_query(forecast_grid_sql)
+    
+        if forecast_grid_df.empty:
+            st.info("No forecast grid available — the nightly chain may not have run yet.")
+        else:
+            chart = (
+                alt.Chart(forecast_grid_df)
+                .mark_rect()
+                .encode(
+                    x=alt.X("hour_of_day:O", title="Hour of day"),
+                    y=alt.Y("day:O", title=None, sort=None),
+                    color=alt.Color("predicted_mw:Q", title="Predicted MW",
+                                    scale=alt.Scale(scheme="reds")),
+                    tooltip=["day", "hour_of_day", "predicted_mw"],
+                )
+            )
+            st.altair_chart(chart, height=300)
+
+
+        with st.expander("All eight days"):
+            st.dataframe(
+                cheapest_window_df, 
+                hide_index=True,
+                column_order=[
+                    "day",
+                    "window_start",
+                    "window_mean_mw",
+                    "day_peak_mw",
+                    "saving_vs_peak_mw",
+                    "lead_days"
+                ],
+                column_config={
+                    "window_mean_mw": st.column_config.NumberColumn("Window mean demand", format="%,.0f MW"),
+                    "day_peak_mw": st.column_config.NumberColumn("Day peak demand", format="%,.0f MW"),
+                    "saving_vs_peak_mw": st.column_config.NumberColumn("Power saved", format="%,.0f MW"),
+                    "lead_days": "Lead days",
+                    "day": "Day of week",
+                    "window_start": "Window start time"
+                }
+            )
 
 
     cheapest_window_container = st.container(border=True)
