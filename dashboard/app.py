@@ -201,6 +201,7 @@ def generate_cheapest_window_sql(window_hours: int) -> str:
         row_number() over (partition by target_date order by window_mean_mw) as rn
     from windows w
     where hours_in_window = {window_hours}
+    and target_ts > CURRENT_TIMESTAMP
     )
     select 
         lead_days,
@@ -526,7 +527,7 @@ with tab_cheapest:
                 alt.Chart(forecast_grid_df)
                 .mark_rect()
                 .encode(
-                    x=alt.X("hour_of_day:O", title="Hour of day"),
+                    x=alt.X("hour_of_day:O", title="Hour of day", axis=alt.Axis(labelAngle=0)),
                     y=alt.Y("day:O", title=None, sort=None),
                     color=alt.Color("predicted_mw:Q", title="Predicted MW",
                                     scale=alt.Scale(scheme="reds")),

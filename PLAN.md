@@ -87,7 +87,7 @@ The phases below are numbered in a logical dependency order, but we are **not** 
 - [x] Decide the ingestion pattern: one Lambda per source, EventBridge schedules. **Lambda over Glue** — tiny non-streaming JSON pulls, seconds of Python, no distributed compute; Lambda's sub-second start + per-ms billing beats Spark's minutes-long cluster spin-up + DPU-hour floor. (Glue only right for GB+ distributed transforms.) **One Lambda per source** — independent schedules, failure isolation, and least-privilege IAM (each role scoped to its one API + one S3 prefix).
 - [x] Write the demand ingestion client (Python — I've got this; you review edge cases). *(Elexon `initialDemandOutturn`; range-capable via `fetch_demand_outturn(from, to)`, 28-day API cap handled by chunking; writes one file per settlement date.)*
 - [x] Write the weather **Previous Runs** ingestion (predictors), stamped by lead offset. *(Client + `reshape_to_long` + `validate()` + per-`issue_date` write loop all live. Range-capable via `daterange_chunks(start, end, chunk_days)` — absolute dates, no `past_days`.)*
-- [ ] Write the weather **actuals** ingestion (targets).
+- [x] Write the weather **actuals** ingestion (targets). *(`src/ingestion/weather_actual_ingest.py` + `weather_actual_lambda`; ERA5 / Historical Forecast. Used to separate forecast-magnitude error from forecast-bias error when chasing the lead-dependent under-forecast — see Results.)*
 - [ ] Write carbon intensity + Agile price ingestion.
 - [~] Add Pydantic validation / data contracts to each. *(Hand-rolled `validate()` tripwires exist — non-empty + required columns — but no Pydantic/contract layer. Note: the 2026-08 ingestion bug proved these tripwires are too weak; a truncated group passes every check. **Three more bugs passed them on 2026-09-12:** the live weather Lambda fetched only `temperature_2m`, emitted no `n` field, and returned leads 0–6 instead of 0–7 — each passed `validate()` and every dbt test. Ingestion is the right layer to catch this because it *knows what it requested*: `HOURLY_VARS` and `forecast_days` are right there, so it can assert the returned variable set and lead coverage match, which no downstream layer can do without hardcoding the expectation.)*
 - [x] Backfill historical data to bootstrap training (Previous Runs archive). *(Weather + demand backfilled 2024-07-01 → 2026-07-11 — 24 months, two full annual cycles. Weather re-run after the chunk/partition fix below; 734 issue_date partitions, all carrying leads 0–7. **Extended 2026-09-13/15 to close a 62-day gap** before scheduled ingestion took over: both sources now contiguous through 2026-09-15 (weather 814 issue dates, demand 807 settlement dates); mart 141,584 → 153,288 rows. Weather's target window has to run 7 days **past** the last wanted issue date — a run issued today already holds its forward predictions — and the `hi − 7` write guard is also what stops the API's arithmetically derived *future* issue dates (09-14…09-20 came back) from landing. Both scripts now expose `ingest_range(date_from, date_to)` taking the **partition key** (issue / settlement dates), so a two-day catch-up is one call; weather adds the +7 internally, and demand's Lambda handler calls the same function as its backfill.)*
@@ -161,8 +161,8 @@ The phases below are numbered in a logical dependency order, but we are **not** 
 
 - [x] Design the Step Functions state machine for the nightly flow. *Four states, `DemandIngest → SourceFreshness → DbtBuild → Inference`, `infra/step_function.tf`. **Not** the retraining flow — retraining is deliberately out of the loop (see below). The design question was what the schedule had been encoding: every arrow was a gap in the clock, 05:00→22:15 being 17 hours of hope and 22:15→22:45 being 30 minutes, so a dbt build that overran by 40 minutes would have had inference read yesterday's lags and write a file that looked fine. **Weather stays on its own 05:00 schedule rather than joining the chain** — its slot is load-bearing (early UTC keeps the `00:00` `issue_ts` stamp near-honest at lead 0), so it is a precondition, not a step; what checks it is the `SourceFreshness` state. The hourly demand rule also stays, for daytime freshness, with the chain starting at 22:10 rather than 22:05 so its own ingest does not collide with the hourly one — two concurrent writers on one S3 key is the hazard already recorded from the weather chunking.*
 - [x] Wire EventBridge schedules for ingestion, feature refresh, inference, accuracy update. *Went from four daily rules to two plus one chain: weather `cron(0 5 * * ? *)` and demand `cron(5 * * * ? *)` stay, the dbt-build and inference rules were **deleted**, and one rule at `cron(10 22 * * ? *)` starts the state machine. The accuracy mart needs no step — it is a dbt model, so `DbtBuild` already refreshes it. Measured end-to-end: 2m36s (ingest 2s, freshness 59s, dbt 87s, inference 7s), so the chain now finishes ~22:13 instead of 22:45 — **1h47m of margin before midnight instead of 75 minutes**, and midnight is the hard deadline because `issue_ts = current_date` stops matching.*
-- [ ] Add error handling, retries, and SNS failure alerts.
-- [ ] Write it all in Terraform. *I write HCL; you correct.*
+- [x] Add error handling, retries, and SNS failure alerts. *(`infra/step_function.tf`: `Retry` with `BackoffRate` 2.0 on DemandIngest and Inference (3 attempts) and DbtBuild (1 — a dbt failure is deterministic, retrying just burns minutes), `Catch` on `States.ALL` from every state into one `NotifyFailure` SNS publish, then a `ChainFailed` terminal state. Each `Catch` uses its own `ResultPath` so the alert names which state died. `infra/sns.tf`; the alert address is in gitignored `terraform.tfvars`.)*
+- [x] Write it all in Terraform. *I write HCL; you correct.* *(`infra/step_function.tf`, `events.tf`, `sns.tf`. Deployed and running nightly at `cron(10 22 * * ? *)`.)*
 - [ ] **Explain-back:** why Step Functions over re-using the orchestration I know from work?
 
 ---
@@ -201,7 +201,7 @@ The phases below are numbered in a logical dependency order, but we are **not** 
   the chain that would have refreshed it. One bad night became a multi-day outage needing
   manual intervention. **Rule: gate freshness on data you do not control.** Your own
   artefact being stale is a symptom, not a cause.
-- [ ] Apply the fix: drop `error_after` on `inference_forecasts` (keep `warn_after`).
+- [x] Apply the fix: drop `error_after` on `inference_forecasts` (keep `warn_after`). *(Applied 2026-11-06 22:11 UTC. Worth recording that the edit sat in the working tree for two days doing nothing: the Nov 5 nightly still failed on the old `error_after` because `source.zip` is only refreshed by `terraform apply`. The deploy-coupling bug biting the fix for the other bug.)*
 
 ---
 
@@ -209,11 +209,11 @@ The phases below are numbered in a logical dependency order, but we are **not** 
 
 *Goal: make it presentable and defensible. Spec: Phase 9.*
 
-- [ ] Fill in the README TODOs with real commands, numbers, and screenshots.
+- [~] Fill in the README TODOs with real commands, numbers, and screenshots. *(Commands, numbers and all four screenshots in. Remaining: architecture diagram, API endpoints, teardown steps, licence.)*
 - [ ] Create the architecture diagram.
 - [ ] Finalise `docs/TEARDOWN.md`.
-- [ ] Capture portfolio screenshots (Step Functions graph, dbt lineage, backtest, dashboard).
-- [ ] Write the "what I'd do differently at scale" section honestly.
+- [~] Capture portfolio screenshots (Step Functions graph, dbt lineage, backtest, dashboard). *(Step Functions, dbt lineage, dashboard, best-time tab and accuracy-over-time all captured in `docs/`. The backtest chart is the one still missing — everything captured so far is live scoring, not the walk-forward folds.)*
+- [x] Write the "what I'd do differently at scale" section honestly.
 - [ ] **Final explain-back:** could I whiteboard this whole architecture and defend every service choice in an interview? If not, which parts are still shaky?
 
 ---

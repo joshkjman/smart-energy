@@ -2,8 +2,7 @@
 
 > A serverless, point-in-time-correct forecasting pipeline on AWS. Ingests live GB electricity demand and issued weather forecasts; builds a leakage-safe feature store; trains and walk-forward-validates a demand forecaster; and tracks forecast accuracy against reality as it arrives.
 
-<!-- TODO: replace with a real screenshot of the dashboard's forecast-vs-actual view -->
-<!-- ![Dashboard](docs/dashboard.png) -->
+![The Foresight dashboard: a KPI row comparing model and baseline MAE at the selected lead, above an hourly forecast-versus-actual chart](docs/dashboard.png)
 
 ---
 
@@ -14,6 +13,8 @@ Foresight forecasts GB electricity demand **1–7 days ahead** — at the horizo
 The project is built to demonstrate **data-engineering judgement**, not just model accuracy. The interesting parts are the point-in-time-correct feature store (no peeking at the future) and the deliberate, defensible AWS service choices — including the services I *didn't* use.
 
 Current results: the model beats a seasonal-naive baseline by **27–48%** at every horizon under walk-forward validation. See [Results](#results).
+
+The dashboard above reports a smaller figure — around 20% at lead 7 — and the gap is a difference of measurement, not of result. The table below is **RMSE** across 14 monthly backtest folds, roughly 20,000 scored hours per lead. The dashboard is **MAE** over the live nightly runs, a few hundred hours so far. Different metric, different sample, and the live number is the one still settling; both are reported rather than whichever flatters.
 
 ---
 
@@ -42,6 +43,18 @@ model artefact (S3, versioned)        Accuracy tracker ──▶ Streamlit dashb
 
    Orchestrated by AWS Step Functions · provisioned with Terraform
 ```
+
+![Step Functions execution graph for smart-energy-nightly: DemandIngest, SourceFreshness, DbtBuild and Inference all succeeded, with every state also wired to a NotifyFailure SNS publish and a ChainFailed terminal state](docs/step-functions.png)
+
+A nightly execution of `smart-energy-nightly`, start to finish in 2m 32s. The chain is
+sequential deliberately: `SourceFreshness` refuses to build on stale inputs, and
+`Inference` runs only after the marts it reads have been rebuilt.
+
+Every state also carries a `Catch` into a single `NotifyFailure` SNS publish and a
+`ChainFailed` terminal state, so a failure anywhere emails me rather than passing
+silently — which matters more than it sounds, because the two worst bugs this project
+hit both reported SUCCESS while doing nothing. Both are written up in
+[What I'd do next](#what-id-do-next).
 
 ---
 
@@ -142,6 +155,13 @@ numbers cannot disagree with each other.
 | **Accuracy over time** | Error by horizon and by nightly run, each against the seasonal-naive baseline. The honesty view: a flat series means the headline is not one lucky week. |
 | **Best time to use energy** | The lowest-predicted-demand window on each of the next 8 days — the practical output of the forecast. |
 
+![Best time to use energy tab: an appliance selector, the cheapest window as a headline with supporting metrics, and a heatmap of predicted demand by hour across the next eight days](docs/best-time.png)
+
+The heatmap is the whole forecast horizon at once — eight days by twenty-four hours, one
+cell per prediction. The pale overnight band and the dark evening ridge are the daily
+cycle the model reproduces unprompted; the appliance selector turns “window length” into
+the question a person actually has.
+
 **On that last tab, deliberately:** lowest predicted demand is a proxy for *cheapest*, not a
 price forecast. Demand sets the marginal plant through the merit order and therefore
 wholesale cost; it does **not** account for wind, which is the larger driver of carbon
@@ -241,7 +261,17 @@ The honest reading is that embedded solar is a **confirmed contributor, not the 
 
 **Day of week — a null result, but only once you check the denominator.** As a percentage the weekend looks worse: Saturday 8.48% and Sunday 8.09% against 7.00–7.27% on weekdays. In absolute terms it isn't — RMSE spans 1,847 to 2,007 MW across all seven days, nearly flat. The percentage gap is almost entirely the smaller denominator: weekend demand averages roughly 2,500 MW less, so the same error is a larger share of it. Signed error stays within ±273 MW throughout, so there is no weekday/weekend bias either. That is a negative control passing, and it is worth stating twice over: weekly seasonality is already carried by the calendar features, *and* a percentage metric can manufacture a pattern that the underlying errors do not contain.
 
-<!-- TODO: add the accuracy-over-time chart -->
+![Dashboard tab showing model and baseline error by forecast lead, and by nightly run over time](docs/accuracy-over-time.png)
+
+Blue is the model, grey the seasonal-naive baseline. Above, by horizon: the model wins
+at all eight leads, widest at lead 0 where recent demand still carries most of the
+signal, narrowing steadily as the lag anchor goes stale.
+
+Below, the same comparison broken out by nightly issue — and the model does **not** win
+every night. On several runs the baseline is lower, and on one it is lower by a wide
+margin. That is the view worth publishing: the headline number is an average over
+production runs that include the bad ones, not a selection of the good ones. A spike is
+a night the weather forecast or the pipeline went wrong, and it stays in the average.
 
 ---
 
