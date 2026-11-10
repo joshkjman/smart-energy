@@ -20,29 +20,47 @@ The dashboard above reports a smaller figure — around 20% at lead 7 — and th
 
 ## Architecture
 
-<!-- TODO: replace this ASCII sketch with a proper diagram (docs/architecture.png) -->
+```mermaid
+flowchart TB
+    subgraph ING["Ingestion · EventBridge, one Lambda per source"]
+        WA["weather_actual_lambda<br/>cron 04:00 · ERA5 actuals"]
+        WF["weather_ingest_lambda<br/>cron 05:00 · Open-Meteo Previous Runs"]
+        DE["demand_ingest_lambda<br/>cron hourly :05 · Elexon"]
+    end
 
-```
-EventBridge (schedules)
-   ├─▶ Lambda: ingest demand (NESO/Elexon)
-   ├─▶ Lambda: ingest weather forecasts (Open-Meteo Previous Runs)
-   └─▶ Lambda: ingest weather actuals (ERA5 / Historical Forecast)
-            │
-            ▼
-      S3 Bronze (raw, Parquet)  ──▶  Glue Crawler ──▶ Glue Data Catalog
-            │
-            ▼
-      Athena + dbt  ──▶  S3 Silver (clean)  ──▶  S3 Gold (point-in-time feature store)
-            │
-   ┌────────┴─────────┐
-   ▼                  ▼
-Scheduled training   Scheduled BATCH inference ──▶ forecasts table (S3/Athena)
-(Lambda/Fargate)                                          │
-   │                                                      ▼
-model artefact (S3, versioned)        Accuracy tracker ──▶ Streamlit dashboard
+    BRONZE[("S3 bronze<br/>raw JSON")]
+    GLUE["Glue Data Catalog<br/>partition projection, no crawler"]
 
-   Orchestrated by AWS Step Functions · provisioned with Terraform
+    WA --> BRONZE
+    WF --> BRONZE
+    DE --> BRONZE
+    BRONZE --- GLUE
+
+    subgraph SFN["Step Functions · smart-energy-nightly · cron 22:10"]
+        direction TB
+        S1["DemandIngest<br/>Lambda"] --> S2["SourceFreshness<br/>CodeBuild · dbt source freshness"]
+        S2 --> S3["DbtBuild<br/>CodeBuild · leakage guard + dbt build"]
+        S3 --> S4["Inference<br/>Lambda · LightGBM"]
+    end
+
+    GLUE --> S2
+    S3 -->|"Athena CTAS"| SILVER[("S3 silver<br/>Parquet")]
+    SILVER --> GOLD[("S3 gold<br/>point-in-time feature store<br/>+ accuracy mart")]
+    GOLD -->|"fct_demand_serving"| S4
+    MODEL[("S3 models/<br/>versioned LightGBM")] --> S4
+    S4 -->|"forecasts, keyed by issue_date"| BRONZE
+
+    S1 & S2 & S3 & S4 -.->|"Catch States.ALL"| SNS["SNS alert<br/>+ ChainFailed"]
+
+    GOLD --> DASH["Streamlit dashboard<br/>via PyAthena"]
+    TRAIN["publish_model.py<br/>run offline, not scheduled"] --> MODEL
 ```
+
+Two things the picture is really about. **The loop:** `Inference` writes its forecast back into bronze keyed by `issue_date`, where it sits untouched until the actuals arrive days later and `fct_forecast_accuracy` scores the two against each other — which is what makes the accuracy numbers unfakeable by construction rather than by promise.
+
+**The guard:** `DbtBuild` runs `dbt ls --select +fct_demand_features` and fails if `stg_weather_actual` appears anywhere upstream. Weather *actuals* are ingested deliberately — they are how forecast-magnitude error was separated from forecast-bias error — but they must never reach a predictor. Asserting that on the dbt DAG rather than on column names means it survives renames and catches laundering through any number of intermediate models.
+
+Training is deliberately outside the loop: a nightly chain that can retrain itself can also silently promote a worse model.
 
 ![Step Functions execution graph for smart-energy-nightly: DemandIngest, SourceFreshness, DbtBuild and Inference all succeeded, with every state also wired to a NotifyFailure SNS publish and a ChainFailed terminal state](docs/step-functions.png)
 

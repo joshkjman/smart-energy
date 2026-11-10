@@ -210,7 +210,7 @@ The phases below are numbered in a logical dependency order, but we are **not** 
 *Goal: make it presentable and defensible. Spec: Phase 9.*
 
 - [~] Fill in the README TODOs with real commands, numbers, and screenshots. *(Commands, numbers and all four screenshots in. Remaining: architecture diagram, API endpoints, teardown steps, licence.)*
-- [ ] Create the architecture diagram.
+- [x] Create the architecture diagram. **Mermaid, not a PNG** — GitHub renders it inline, it diffs in review, and it cannot silently drift from the infra the way the old ASCII block did (it claimed a Glue Crawler; the reality is partition projection).
 - [ ] Finalise `docs/TEARDOWN.md`.
 - [~] Capture portfolio screenshots (Step Functions graph, dbt lineage, backtest, dashboard). *(Step Functions, dbt lineage, dashboard, best-time tab and accuracy-over-time all captured in `docs/`. The backtest chart is the one still missing — everything captured so far is live scoring, not the walk-forward folds.)*
 - [x] Write the "what I'd do differently at scale" section honestly.
