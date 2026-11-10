@@ -221,6 +221,20 @@ data "aws_iam_policy_document" "dbt_build_permissions" {
   }
 
   statement {
+    effect = "Allow"
+    actions = [
+      "glue:BatchDeletePartition",
+      "glue:BatchCreatePartition",
+      "glue:GetPartition",
+    ]
+    resources = [
+      "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:database/silver",
+      "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:table/silver/*",
+      "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:catalog",
+    ]
+  }
+
+  statement {
     effect  = "Allow"
     actions = ["s3:GetObject"]
     resources = [

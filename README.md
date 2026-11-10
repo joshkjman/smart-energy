@@ -198,6 +198,10 @@ rather than quietly implied.
 
 Error is RMSE as a percentage of mean demand. Both rows are scored on identical target timestamps.
 
+![Line chart of walk-forward backtest error by forecast lead. The seasonal-naive baseline is flat at 10.96% for leads 0-6 and steps up to 12.04% at lead 7; the LightGBM model rises monotonically from 5.72% at lead 0 to 8.51% at lead 7. The gap between them is shaded and narrows as the horizon lengthens](docs/backtest.png)
+
+The shape is the point. The baseline is flat because a same-weekday anchor does not care how far ahead you are standing; the model climbs steadily because it genuinely only sees the past. The shaded gap is the margin, and it narrows from 47.8% at lead 0 to 26.8% at lead 6 — the model's advantage is largest where recent demand is still knowable, and shrinks as that anchor goes stale.
+
 | Lead (days) | Baseline | LightGBM | Improvement |
 |---|---|---|---|
 | 0 | 10.96% | **5.72%** | −47.8% |
