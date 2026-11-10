@@ -14,7 +14,7 @@ Some things can be left but the most important things should be s3 as its the hi
 
 ### 1. Stop the schedule first
 
-Destroy schedule first so that it doesn't create new partitions in bucket in automated ingestion
+disable-rule first so that it doesn't create new partitions in bucket in automated ingestion
 
 ```bash
 for r in demand_ingest_event weather_ingest_event weather_actual_event sfn_state_machine_event; do
@@ -80,7 +80,10 @@ than no-ops. That's your stop condition.
 
 Stop the S3 request traffic those queries generate from running as they are the 
 non-free tier items and means you don't need to rebuild history like you would 
-have to for data in s3.
+have to for data in S3.
+
+S3, October:   requests  $1.89   ← schedule-driven, stops when rules are disabled
+               storage   $0.03   ← the only thing deleting data saves
 
 ## What survives, deliberately
 
