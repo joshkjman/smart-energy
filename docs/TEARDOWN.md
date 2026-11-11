@@ -4,7 +4,7 @@ This doc is for knowing how to tear down the infrastructure of this project not 
 
 ## Should this be a full teardown?
 
-Some things can be left but the most important things should be s3 as its the highest cost right now.
+Some things can be left, but the one that matters is S3 as it is the highest cost right now. Nearly all of that is requests, not storage ($1.89 vs $0.03 in October), so disabling the schedules stops most of the bill without deleting anything. A full destroy only saves the $0.03 of storage.
 
 ## Order of operations
 

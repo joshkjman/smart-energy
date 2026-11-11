@@ -109,7 +109,31 @@ All open, no paid access required.
 - **Carbon intensity** — Carbon Intensity API (api.carbonintensity.org.uk)
 - **Agile prices** — Octopus Energy public API
 
-<!-- TODO: confirm exact endpoints/params you settled on and link them here -->
+### Endpoints as called
+
+| Source | Request | Key parameters |
+|---|---|---|
+| Demand actuals | `GET` [`data.elexon.co.uk/bmrs/api/v1/demand/outturn`](https://bmrs.elexon.co.uk/api-documentation) | `settlementDateFrom`, `settlementDateTo`, `format=json` |
+| Weather forecast *(predictors)* | `GET` [`previous-runs-api.open-meteo.com/v1/forecast`](https://open-meteo.com/en/docs/previous-runs-api) | `latitude=51.5085`, `longitude=-0.1257`, `models=gfs_seamless`, `start_date`, `end_date`, `hourly=` the two variables **plus** `_previous_day1 … _previous_day7` |
+| Weather actuals *(diagnostics only)* | `GET` [`archive-api.open-meteo.com/v1/archive`](https://open-meteo.com/en/docs/historical-weather-api) | same coordinates, `models=ecmwf_ifs`, `hourly=temperature_2m,shortwave_radiation` |
+| Bank holidays | `GET` [`www.gov.uk/bank-holidays.json`](https://www.gov.uk/bank-holidays.json) | none |
+
+Three details that are load-bearing rather than incidental:
+
+**`_previous_dayN` is the whole point-in-time mechanism.** Open-Meteo's Previous Runs
+API returns, for one target hour, what the forecast *said* N days earlier. That suffix
+is what makes a lead-7 feature legitimately knowable seven days ahead, and it is why
+the predictors never touch the archive endpoint.
+
+**`models` is pinned on both calls, and that was not the original code.** Left
+unpinned, both endpoints default to Open-Meteo's `best_match`, a blend that can
+resolve differently per endpoint and horizon — which is how the forecast-vs-archive
+divergence in [Where the error comes from](#where-the-error-comes-from) was first
+mistaken for a model-choice problem.
+
+**The schedules are staggered, not simultaneous:** weather forecast 05:00 UTC,
+weather actuals 04:00 UTC, demand hourly at `:05`, and the Step Functions chain at
+22:10 UTC — late enough that the day's demand and forecast have both landed.
 
 ---
 
@@ -149,11 +173,21 @@ aws stepfunctions start-execution   --state-machine-arn "$(aws stepfunctions lis
 pip install -r requirements-dashboard.txt
 streamlit run dashboard/app.py
 
-# 4. Tear down when done
-terraform destroy
+# 4. Stop the bill without losing the history (the usual case)
+#    CodeBuild and Athena are schedule-driven, so disabling the rules
+#    takes recurring spend to roughly zero. S3 storage is ~£0.03/month.
+for r in demand_ingest_event weather_ingest_event weather_actual_event sfn_state_machine_event; do
+  aws events disable-rule --name "$r" --region eu-west-2
+done
+
+# 5. Full teardown — see docs/TEARDOWN.md before running this.
+#    `terraform destroy` alone will FAIL on the data bucket with
+#    BucketNotEmpty. That is deliberate, not a bug.
+cd infra && terraform destroy
 ```
 
-<!-- TODO: flesh out each step with real commands once built. See docs/TEARDOWN.md for full teardown. -->
+Full teardown, including the versioned-bucket ordering and why the state bucket must
+go last and by hand, is in [`docs/TEARDOWN.md`](docs/TEARDOWN.md).
 
 ---
 
@@ -385,7 +419,14 @@ In rough order of value, and honest about why each is not built yet.
 
 ## Licence
 
-<!-- TODO: choose one, e.g. MIT -->
+[MIT](LICENSE) — use it, fork it, learn from it.
+
+The code is mine; the data is not. Demand data is © Elexon under the
+[BMRS terms](https://bmrs.elexon.co.uk/terms-and-conditions), weather data is
+Open-Meteo under [CC BY 4.0](https://open-meteo.com/en/license), and bank holidays
+are gov.uk under the
+[Open Government Licence](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/).
+No credentials, account identifiers or personal data are in this repository.
 
 ---
 

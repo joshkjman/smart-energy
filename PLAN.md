@@ -209,7 +209,7 @@ The phases below are numbered in a logical dependency order, but we are **not** 
 
 *Goal: make it presentable and defensible. Spec: Phase 9.*
 
-- [~] Fill in the README TODOs with real commands, numbers, and screenshots. *(Commands, numbers and all four screenshots in. Remaining: architecture diagram, API endpoints, teardown steps, licence.)*
+- [x] Fill in the README TODOs with real commands, numbers, and screenshots. *(All four screenshots, the Mermaid architecture diagram, the as-called endpoint table, the two-tier teardown and an MIT licence with upstream data attribution. Zero TODO markers left in the file.)*
 - [x] Create the architecture diagram. **Mermaid, not a PNG** — GitHub renders it inline, it diffs in review, and it cannot silently drift from the infra the way the old ASCII block did (it claimed a Glue Crawler; the reality is partition projection).
 - [ ] Finalise `docs/TEARDOWN.md`.
 - [x] Capture portfolio screenshots (Step Functions graph, dbt lineage, backtest, dashboard). *(All captured in `docs/`. The backtest chart is rendered from `src/ml/plot_backtest.py` against the committed results table rather than recomputed, so the chart cannot drift from the numbers beside it.)*
