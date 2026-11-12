@@ -350,13 +350,6 @@ The flat 354 MW is consistent with a mixture of the warm forecast bias and the m
 
 None of this is leakage. A model using future information gets *better* at long leads, because that information is worth more the further ahead it reaches. This one gets monotonically worse, with a bias that scales with staleness — the signature of a model that genuinely only sees the past. Weather actuals are kept out of the feature path by a CI assertion on the dbt DAG rather than a naming convention, so the claim is checkable: `dbt ls --select +fct_demand_features` must not contain `stg_weather_actual`.
 
-
-## Relevance to Octopus Energy
-
-Demand (and price) forecasting underpins grid balancing, tariff-setting, and flexibility products. Better short-term forecasts mean less spinning reserve held in readiness, which cuts both cost and carbon. This is a simplified, public-data version of a problem an energy data team works on directly.
-
-**Honest boundary:** this uses open national/regional data. A production version would draw on internal half-hourly metering, settlement data, and proprietary signals — out of scope here, and the README says so deliberately.
-
 ---
 
 <a id="what-id-do-next"></a>
